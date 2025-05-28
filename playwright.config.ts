@@ -40,6 +40,12 @@ export default defineConfig({
     /* Base URL to use in actions like `await page.goto('/')`. */
     baseURL: process.env.BASE_URL || "https://playwright.dev",
 
+    /* Global timeout for each test */
+    actionTimeout: 10000,
+
+    /* Navigation timeout */
+    navigationTimeout: 30000,
+
     /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
     trace: "on-first-retry",
 
@@ -49,6 +55,9 @@ export default defineConfig({
     /* Record video only when test fails */
     video: "retain-on-failure",
   },
+
+  /* Global test timeout */
+  timeout: 60000,
 
   /* Configure projects for major browsers */
   projects: [
