@@ -55,7 +55,7 @@ test.describe("Playwright Website Tests", () => {
   });
 
   // Simple intentional failure test
-  test("intentional failure demo", async ({ page }) => {
+  test.skip("intentional failure demo", async ({ page }) => {
     await page.goto("/");
 
     // This will fail to demonstrate failure reporting
