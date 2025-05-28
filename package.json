@@ -1,0 +1,32 @@
+{
+    "name": "playwright-ctrf-demo",
+    "version": "1.0.0",
+    "description": "Playwright testing with CTRF reporting and GitHub Actions",
+    "main": "index.js",
+    "scripts": {
+        "test": "playwright test",
+        "test:headed": "playwright test --headed",
+        "test:ui": "playwright test --ui",
+        "test:debug": "playwright test --debug",
+        "report": "playwright show-report",
+        "install:browsers": "playwright install"
+    },
+    "keywords": [
+        "playwright",
+        "testing",
+        "ctrf",
+        "github-actions",
+        "e2e"
+    ],
+    "author": "Your Name",
+    "license": "MIT",
+    "devDependencies": {
+        "@playwright/test": "^1.44.0",
+        "playwright-ctrf-json-reporter": "^0.0.8",
+        "@types/node": "^20.0.0",
+        "typescript": "^5.0.0"
+    },
+    "engines": {
+        "node": ">=18"
+    }
+}
