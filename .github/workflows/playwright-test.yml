@@ -7,6 +7,12 @@ on:
     branches: [main, master]
   workflow_dispatch:
 
+# Add required permissions for Pages deployment
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
 jobs:
   test:
     name: Run Playwright Tests
@@ -81,16 +87,13 @@ jobs:
     runs-on: ubuntu-latest
     needs: test
     if: always()
-    permissions:
-      contents: write
-      pages: write
-      id-token: write
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0 # Fetch all history for all branches
 
       - name: Download CTRF Report
         uses: actions/download-artifact@v4
@@ -201,37 +204,73 @@ jobs:
               console.log('Error processing report:', error);
             }
 
-      - name: Setup Pages Branch and Deploy Reports
+      - name: Build Pages Site
         run: |
-          # Configure git
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-
-          # Create timestamp and branch name
+          # Create timestamp and identifiers
           TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
           RUN_ID="${{ github.run_id }}"
           BRANCH_NAME="${{ github.ref_name }}"
           COMMIT_SHA="${{ github.sha }}"
 
-          # Try to checkout existing gh-pages branch or create new one
-          git fetch origin gh-pages:gh-pages 2>/dev/null || git checkout --orphan gh-pages
-          git checkout gh-pages 2>/dev/null || echo "Created new gh-pages branch"
-
-          # Create directory structure
-          mkdir -p reports/$TIMESTAMP-$RUN_ID
+          # Create pages directory structure
+          mkdir -p pages/reports/$TIMESTAMP-$RUN_ID
 
           # Copy current report to timestamped directory
           if [ -d "current-report" ]; then
-            cp -r current-report/* reports/$TIMESTAMP-$RUN_ID/
+            cp -r current-report/* pages/reports/$TIMESTAMP-$RUN_ID/
           fi
 
           # Copy CTRF report
           if [ -f "reports/ctrf-report.json" ]; then
-            cp reports/ctrf-report.json reports/$TIMESTAMP-$RUN_ID/
+            cp reports/ctrf-report.json pages/reports/$TIMESTAMP-$RUN_ID/
           fi
 
-          # Create/update index.html with report listing
-          cat > index.html << 'EOF'
+          # Extract test results from CTRF report
+          TOTAL_TESTS=0
+          PASSED_TESTS=0
+          FAILED_TESTS=0
+
+          if [ -f "reports/ctrf-report.json" ]; then
+            TOTAL_TESTS=$(jq -r '.results.summary.tests // 0' reports/ctrf-report.json)
+            PASSED_TESTS=$(jq -r '.results.summary.passed // 0' reports/ctrf-report.json)
+            FAILED_TESTS=$(jq -r '.results.summary.failed // 0' reports/ctrf-report.json)
+          fi
+
+          # Try to get existing reports index from gh-pages branch
+          REPORTS_JSON="[]"
+          if git show origin/gh-pages:reports-index.json 2>/dev/null; then
+            git show origin/gh-pages:reports-index.json > pages/reports-index.json 2>/dev/null || echo "[]" > pages/reports-index.json
+            REPORTS_JSON=$(cat pages/reports-index.json)
+          else
+            echo "[]" > pages/reports-index.json
+          fi
+
+          # Add new report entry to the beginning of the array
+          NEW_ENTRY=$(jq -n \
+            --arg timestamp "$(date -Iseconds)" \
+            --arg directory "$TIMESTAMP-$RUN_ID" \
+            --arg branch "$BRANCH_NAME" \
+            --arg commit "$COMMIT_SHA" \
+            --arg runId "$RUN_ID" \
+            --argjson total "$TOTAL_TESTS" \
+            --argjson passed "$PASSED_TESTS" \
+            --argjson failed "$FAILED_TESTS" \
+            '{
+              timestamp: $timestamp,
+              directory: $directory,
+              branch: $branch,
+              commit: $commit,
+              runId: $runId,
+              total: $total,
+              passed: $passed,
+              failed: $failed
+            }')
+
+          # Update reports index (keep only last 50 reports)
+          echo "$REPORTS_JSON" | jq --argjson new "$NEW_ENTRY" '. = [$new] + . | .[0:50]' > pages/reports-index.json
+
+          # Create main index.html
+          cat > pages/index.html << 'EOF'
           <!DOCTYPE html>
           <html lang="en">
           <head>
@@ -332,6 +371,11 @@ jobs:
                           const reportsContainer = document.getElementById('reports');
                           reportsContainer.innerHTML = '';
                           
+                          if (reports.length === 0) {
+                              reportsContainer.innerHTML = '<p>No reports found yet. Run some tests to see reports here!</p>';
+                              return;
+                          }
+                          
                           reports.forEach((report, index) => {
                               const card = document.createElement('div');
                               card.className = 'report-card';
@@ -370,24 +414,94 @@ jobs:
           </html>
           EOF
 
-          # Create/update reports index JSON
-          REPORTS_JSON="[]"
-          if [ -f "reports-index.json" ]; then
-            REPORTS_JSON=$(cat reports-index.json)
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload Pages Artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: "./pages"
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+        environment:
+          name: github-pages
+          url: ${{ steps.deployment.outputs.page_url }}
+
+  # Separate job to commit to gh-pages branch (for backup/history)
+  commit-to-gh-pages:
+    name: Commit to gh-pages branch
+    runs-on: ubuntu-latest
+    needs: [test, report]
+    if: always() && needs.test.result != 'skipped'
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Download CTRF Report
+        uses: actions/download-artifact@v4
+        with:
+          name: ctrf-report
+          path: reports/
+
+      - name: Download HTML Report
+        uses: actions/download-artifact@v4
+        with:
+          name: playwright-html-report
+          path: current-report/
+
+      - name: Setup Git and Commit to gh-pages
+        run: |
+          # Configure git
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Create timestamp and identifiers
+          TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
+          RUN_ID="${{ github.run_id }}"
+          BRANCH_NAME="${{ github.ref_name }}"
+          COMMIT_SHA="${{ github.sha }}"
+
+          # Switch to gh-pages branch (create if doesn't exist)
+          git checkout gh-pages 2>/dev/null || git checkout --orphan gh-pages
+
+          # Clear the branch if it's new
+          if [ ! -f "reports-index.json" ]; then
+            git rm -rf . 2>/dev/null || true
+            echo "[]" > reports-index.json
           fi
 
-          # Extract test results from CTRF report
+          # Create directory structure
+          mkdir -p reports/$TIMESTAMP-$RUN_ID
+
+          # Copy reports
+          if [ -d "../current-report" ]; then
+            cp -r ../current-report/* reports/$TIMESTAMP-$RUN_ID/
+          fi
+
+          if [ -f "../reports/ctrf-report.json" ]; then
+            cp ../reports/ctrf-report.json reports/$TIMESTAMP-$RUN_ID/
+          fi
+
+          # Extract test results
           TOTAL_TESTS=0
           PASSED_TESTS=0
           FAILED_TESTS=0
 
-          if [ -f "reports/ctrf-report.json" ]; then
-            TOTAL_TESTS=$(jq -r '.results.summary.tests // 0' reports/ctrf-report.json)
-            PASSED_TESTS=$(jq -r '.results.summary.passed // 0' reports/ctrf-report.json)
-            FAILED_TESTS=$(jq -r '.results.summary.failed // 0' reports/ctrf-report.json)
+          if [ -f "../reports/ctrf-report.json" ]; then
+            TOTAL_TESTS=$(jq -r '.results.summary.tests // 0' ../reports/ctrf-report.json)
+            PASSED_TESTS=$(jq -r '.results.summary.passed // 0' ../reports/ctrf-report.json)
+            FAILED_TESTS=$(jq -r '.results.summary.failed // 0' ../reports/ctrf-report.json)
           fi
 
-          # Add new report entry to the beginning of the array
+          # Update reports index
+          REPORTS_JSON=$(cat reports-index.json 2>/dev/null || echo "[]")
+
           NEW_ENTRY=$(jq -n \
             --arg timestamp "$(date -Iseconds)" \
             --arg directory "$TIMESTAMP-$RUN_ID" \
@@ -408,20 +522,9 @@ jobs:
               failed: $failed
             }')
 
-          # Update reports index (keep only last 50 reports)
           echo "$REPORTS_JSON" | jq --argjson new "$NEW_ENTRY" '. = [$new] + . | .[0:50]' > reports-index.json
 
-          # Add all files to git
+          # Add and commit
           git add .
-
-          # Commit changes
-          git commit -m "Add test report for run $RUN_ID ($(date))" || echo "No changes to commit"
-
-          # Push to gh-pages branch
+          git commit -m "Add test report for run $RUN_ID from $BRANCH_NAME ($COMMIT_SHA)" || echo "No changes to commit"
           git push origin gh-pages
-
-      - name: Deploy to GitHub Pages
-        uses: actions/deploy-pages@v4
-        with:
-          branch: gh-pages
-          folder: .
