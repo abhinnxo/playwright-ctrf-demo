@@ -1,4 +1,4 @@
-name: Playwright Tests with History and GitHub Pages
+name: Playwright Tests with Full History on GitHub Pages
 
 on:
   push:
@@ -52,14 +52,10 @@ jobs:
         if: steps.playwright-cache.outputs.cache-hit == 'true'
         run: npx playwright install-deps
 
-      - name: Run Playwright Tests
-        run: npx playwright test
+      - name: Run Playwright Tests and Generate HTML Report
+        run: npx playwright test --reporter=html
         env:
           CI: true
-
-      - name: Generate HTML Report
-        run: npx playwright show-report
-        if: always()
 
       - name: Upload HTML Report
         uses: actions/upload-artifact@v4
@@ -89,51 +85,52 @@ jobs:
           name: playwright-html-report
           path: playwright-report/
 
-      - name: Prepare Pages Content
+      - name: Prepare Deployment Content
         run: |
-          # Create timestamped directory
-          TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
-          RUN_ID="${{ github.run_id }}"
-          mkdir -p public/reports/$TIMESTAMP-$RUN_ID
-          cp -r playwright-report/* public/reports/$TIMESTAMP-$RUN_ID/
+          # Create public directory
+          mkdir -p public/reports
 
-          # Create or update reports index
+          # Get existing reports index if available
           if [ -f "public/reports-index.json" ]; then
             REPORTS_JSON=$(cat public/reports-index.json)
           else
             REPORTS_JSON="[]"
           fi
 
-          # Extract test results summary
-          TOTAL_TESTS=$(grep -o '"total": [0-9]*' playwright-report/data.json | cut -d' ' -f2 || echo 0)
-          PASSED_TESTS=$(grep -o '"passed": [0-9]*' playwright-report/data.json | cut -d' ' -f2 || echo 0)
-          FAILED_TESTS=$(grep -o '"failed": [0-9]*' playwright-report/data.json | cut -d' ' -f2 || echo 0)
+          # Create unique directory for this run
+          TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
+          RUN_ID="${{ github.run_id }}"
+          mkdir -p public/reports/$RUN_ID
+          cp -r playwright-report/* public/reports/$RUN_ID/
+
+          # Extract test results from the report
+          TOTAL_TESTS=$(jq -r '.stats.total' playwright-report/data.json || echo 0)
+          PASSED_TESTS=$(jq -r '.stats.expected' playwright-report/data.json || echo 0)
+          FAILED_TESTS=$(jq -r '.stats.unexpected' playwright-report/data.json || echo 0)
 
           # Create new report entry
           NEW_ENTRY=$(jq -n \
             --arg timestamp "$(date -Iseconds)" \
-            --arg directory "$TIMESTAMP-$RUN_ID" \
+            --arg runId "$RUN_ID" \
             --arg branch "${{ github.ref_name }}" \
             --arg commit "${{ github.sha }}" \
-            --arg runId "$RUN_ID" \
             --argjson total "$TOTAL_TESTS" \
             --argjson passed "$PASSED_TESTS" \
             --argjson failed "$FAILED_TESTS" \
             '{
               timestamp: $timestamp,
-              directory: $directory,
+              runId: $runId,
               branch: $branch,
               commit: $commit,
-              runId: $runId,
               total: $total,
               passed: $passed,
               failed: $failed,
               status: (if $failed > 0 then "failed" else "passed" end),
-              url: ("/reports/" + $directory + "/index.html")
+              url: ("reports/" + $runId + "/index.html")
             }')
 
-          # Update reports index (keep last 100 reports)
-          echo "$REPORTS_JSON" | jq --argjson new "$NEW_ENTRY" '. = [$new] + . | .[0:100]' > public/reports-index.json
+          # Update reports index (keep last 50 reports)
+          echo "$REPORTS_JSON" | jq --argjson new "$NEW_ENTRY" '. = [$new] + . | .[0:50]' > public/reports-index.json
 
           # Create landing page
           cat > public/index.html << 'EOF'
@@ -144,174 +141,255 @@ jobs:
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>Playwright Test Reports</title>
               <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+              <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
               <style>
+                  body {
+                      background-color: #f8f9fa;
+                  }
                   .report-card {
-                      transition: transform 0.2s;
+                      transition: all 0.2s ease;
+                      border-left: 4px solid transparent;
                   }
                   .report-card:hover {
-                      transform: translateY(-5px);
-                      box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+                      transform: translateY(-2px);
+                      box-shadow: 0 4px 8px rgba(0,0,0,0.1);
                   }
-                  .badge-latest {
-                      background-color: #6f42c1;
+                  .report-card.passed {
+                      border-left-color: #28a745;
                   }
-                  .status-passed {
-                      background-color: #2c8a5a;
+                  .report-card.failed {
+                      border-left-color: #dc3545;
                   }
-                  .status-failed {
-                      background-color: #dc3545;
+                  .status-badge {
+                      font-size: 0.8rem;
                   }
                   .commit-hash {
                       font-family: monospace;
+                      font-size: 0.9rem;
+                  }
+                  .nav-tabs .nav-link.active {
+                      font-weight: 500;
+                  }
+                  .chart-container {
+                      height: 300px;
                   }
               </style>
           </head>
-          <body class="bg-light">
-              <div class="container py-5">
-                  <div class="text-center mb-5">
-                      <h1 class="display-4">🧪 Playwright Test Reports</h1>
-                      <p class="lead">Historical test execution reports</p>
+          <body>
+              <div class="container py-4">
+                  <div class="d-flex justify-content-between align-items-center mb-4">
+                      <h1 class="h3 mb-0">
+                          <i class="bi bi-speedometer2 me-2"></i>Playwright Test Reports
+                      </h1>
+                      <a href="https://playwright.dev" target="_blank" class="btn btn-sm btn-outline-secondary">
+                          <i class="bi bi-box-arrow-up-right"></i> Playwright Docs
+                      </a>
                   </div>
-                  
-                  <div class="row mb-4">
-                      <div class="col-md-6">
-                          <div class="card shadow-sm">
+
+                  <ul class="nav nav-tabs mb-4" id="reportTabs" role="tablist">
+                      <li class="nav-item" role="presentation">
+                          <button class="nav-link active" id="latest-tab" data-bs-toggle="tab" data-bs-target="#latest" type="button" role="tab">
+                              Latest Report
+                          </button>
+                      </li>
+                      <li class="nav-item" role="presentation">
+                          <button class="nav-link" id="history-tab" data-bs-toggle="tab" data-bs-target="#history" type="button" role="tab">
+                              Report History
+                          </button>
+                      </li>
+                      <li class="nav-item" role="presentation">
+                          <button class="nav-link" id="trends-tab" data-bs-toggle="tab" data-bs-target="#trends" type="button" role="tab">
+                              Trends
+                          </button>
+                      </li>
+                  </ul>
+
+                  <div class="tab-content" id="reportTabsContent">
+                      <div class="tab-pane fade show active" id="latest" role="tabpanel">
+                          <div class="card mb-4">
                               <div class="card-body">
-                                  <h5 class="card-title">Latest Report</h5>
-                                  <div id="latest-report"></div>
+                                  <h5 class="card-title" id="latest-report-title">Loading latest report...</h5>
+                                  <div id="latest-report-content"></div>
                               </div>
                           </div>
                       </div>
-                      <div class="col-md-6">
-                          <div class="card shadow-sm">
+
+                      <div class="tab-pane fade" id="history" role="tabpanel">
+                          <div class="card">
                               <div class="card-body">
-                                  <h5 class="card-title">Statistics</h5>
-                                  <div id="stats-chart" style="height: 200px;"></div>
+                                  <div class="table-responsive">
+                                      <table class="table table-hover">
+                                          <thead>
+                                              <tr>
+                                                  <th>Date</th>
+                                                  <th>Run ID</th>
+                                                  <th>Branch</th>
+                                                  <th>Commit</th>
+                                                  <th>Results</th>
+                                                  <th>Status</th>
+                                                  <th>Actions</th>
+                                              </tr>
+                                          </thead>
+                                          <tbody id="reports-table-body">
+                                              <tr>
+                                                  <td colspan="7" class="text-center">Loading reports...</td>
+                                              </tr>
+                                          </tbody>
+                                      </table>
+                                  </div>
                               </div>
                           </div>
                       </div>
-                  </div>
-                  
-                  <div class="card shadow-sm mb-4">
-                      <div class="card-header">
-                          <h5 class="mb-0">All Reports</h5>
-                      </div>
-                      <div class="card-body">
-                          <div class="table-responsive">
-                              <table class="table table-hover" id="reports-table">
-                                  <thead>
-                                      <tr>
-                                          <th>Date</th>
-                                          <th>Branch</th>
-                                          <th>Commit</th>
-                                          <th>Tests</th>
-                                          <th>Status</th>
-                                          <th>Actions</th>
-                                      </tr>
-                                  </thead>
-                                  <tbody id="reports-body">
-                                      <!-- Reports will be loaded here -->
-                                  </tbody>
-                              </table>
+
+                      <div class="tab-pane fade" id="trends" role="tabpanel">
+                          <div class="card">
+                              <div class="card-body">
+                                  <div class="chart-container">
+                                      <canvas id="trends-chart"></canvas>
+                                  </div>
+                              </div>
                           </div>
                       </div>
                   </div>
               </div>
 
+              <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
               <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
               <script>
-                  async function loadReports() {
+                  document.addEventListener('DOMContentLoaded', async function() {
                       try {
-                          const response = await fetch('/reports-index.json');
+                          // Load reports data
+                          const response = await fetch('reports-index.json');
                           const reports = await response.json();
                           
-                          // Display latest report
-                          if (reports.length > 0) {
-                              const latest = reports[0];
-                              const latestDiv = document.getElementById('latest-report');
-                              latestDiv.innerHTML = `
-                                  <p><strong>Run ID:</strong> #${latest.runId}</p>
-                                  <p><strong>Date:</strong> ${new Date(latest.timestamp).toLocaleString()}</p>
-                                  <p><strong>Branch:</strong> ${latest.branch}</p>
-                                  <p><strong>Commit:</strong> <span class="commit-hash">${latest.commit.substring(0, 7)}</span></p>
-                                  <p><strong>Results:</strong> ${latest.passed} passed, ${latest.failed} failed of ${latest.total} tests</p>
-                                  <a href="${latest.url}" class="btn btn-primary mt-2">
-                                      View Full Report
-                                  </a>
-                              `;
+                          if (reports.length === 0) {
+                              document.getElementById('latest-report-title').textContent = 'No reports available';
+                              document.getElementById('latest-report-content').innerHTML = 
+                                  '<div class="alert alert-info">No test reports have been generated yet.</div>';
+                              return;
                           }
+
+                          // Display latest report
+                          const latest = reports[0];
+                          document.getElementById('latest-report-title').textContent = 
+                              `Test Run #${latest.runId} - ${new Date(latest.timestamp).toLocaleString()}`;
                           
+                          document.getElementById('latest-report-content').innerHTML = `
+                              <div class="mb-3">
+                                  <span class="badge bg-secondary">${latest.branch}</span>
+                                  <span class="badge bg-dark commit-hash ms-2">${latest.commit.substring(0, 7)}</span>
+                              </div>
+                              <div class="d-flex mb-3">
+                                  <div class="me-4">
+                                      <h6 class="text-muted">Total Tests</h6>
+                                      <h3>${latest.total}</h3>
+                                  </div>
+                                  <div class="me-4">
+                                      <h6 class="text-success">Passed</h6>
+                                      <h3 class="text-success">${latest.passed}</h3>
+                                  </div>
+                                  <div>
+                                      <h6 class="${latest.failed > 0 ? 'text-danger' : 'text-muted'}">Failed</h6>
+                                      <h3 class="${latest.failed > 0 ? 'text-danger' : 'text-muted'}">${latest.failed}</h3>
+                                  </div>
+                              </div>
+                              <a href="${latest.url}" class="btn btn-primary">
+                                  <i class="bi bi-file-earmark-text"></i> View Full Report
+                              </a>
+                          `;
+
                           // Populate reports table
-                          const tbody = document.getElementById('reports-body');
+                          const tbody = document.getElementById('reports-table-body');
                           tbody.innerHTML = reports.map(report => `
                               <tr>
                                   <td>${new Date(report.timestamp).toLocaleString()}</td>
+                                  <td>#${report.runId}</td>
                                   <td>${report.branch}</td>
                                   <td><span class="commit-hash">${report.commit.substring(0, 7)}</span></td>
-                                  <td>${report.total} total (${report.passed}✓ ${report.failed}✗)</td>
+                                  <td>${report.passed} / ${report.total}</td>
                                   <td>
-                                      <span class="badge rounded-pill status-${report.status}">
+                                      <span class="badge rounded-pill ${report.status === 'passed' ? 'bg-success' : 'bg-danger'}">
                                           ${report.status === 'passed' ? 'Passed' : 'Failed'}
                                       </span>
-                                      ${report.runId === reports[0].runId ? '<span class="badge rounded-pill badge-latest">Latest</span>' : ''}
                                   </td>
                                   <td>
-                                      <a href="${report.url}" class="btn btn-sm btn-outline-primary">View</a>
+                                      <a href="${report.url}" class="btn btn-sm btn-outline-primary">
+                                          <i class="bi bi-eye"></i> View
+                                      </a>
                                   </td>
                               </tr>
                           `).join('');
-                          
-                          // Create stats chart
-                          const ctx = document.getElementById('stats-chart').getContext('2d');
+
+                          // Create trends chart
                           const last10 = reports.slice(0, 10).reverse();
+                          const ctx = document.getElementById('trends-chart').getContext('2d');
                           new Chart(ctx, {
                               type: 'line',
                               data: {
-                                  labels: last10.map(r => new Date(r.timestamp).toLocaleDateString()),
+                                  labels: last10.map(r => `Run #${r.runId}`),
                                   datasets: [
                                       {
-                                          label: 'Passed',
-                                          data: last10.map(r => r.passed),
-                                          borderColor: '#2c8a5a',
-                                          backgroundColor: 'rgba(44, 138, 90, 0.1)',
-                                          tension: 0.3
+                                          label: 'Pass Rate (%)',
+                                          data: last10.map(r => Math.round((r.passed / r.total) * 100)),
+                                          borderColor: '#28a745',
+                                          backgroundColor: 'rgba(40, 167, 69, 0.1)',
+                                          tension: 0.3,
+                                          yAxisID: 'y'
                                       },
                                       {
-                                          label: 'Failed',
+                                          label: 'Failed Tests',
                                           data: last10.map(r => r.failed),
                                           borderColor: '#dc3545',
                                           backgroundColor: 'rgba(220, 53, 69, 0.1)',
-                                          tension: 0.3
+                                          tension: 0.3,
+                                          yAxisID: 'y1'
                                       }
                                   ]
                               },
                               options: {
                                   responsive: true,
-                                  plugins: {
-                                      legend: {
-                                          position: 'top',
-                                      }
+                                  interaction: {
+                                      mode: 'index',
+                                      intersect: false
                                   },
                                   scales: {
                                       y: {
-                                          beginAtZero: true
+                                          type: 'linear',
+                                          display: true,
+                                          position: 'left',
+                                          title: {
+                                              display: true,
+                                              text: 'Pass Rate (%)'
+                                          },
+                                          min: 0,
+                                          max: 100
+                                      },
+                                      y1: {
+                                          type: 'linear',
+                                          display: true,
+                                          position: 'right',
+                                          title: {
+                                              display: true,
+                                              text: 'Failed Tests'
+                                          },
+                                          min: 0,
+                                          grid: {
+                                              drawOnChartArea: false
+                                          }
                                       }
                                   }
                               }
                           });
+
                       } catch (error) {
                           console.error('Error loading reports:', error);
-                          document.getElementById('reports-body').innerHTML = `
-                              <tr>
-                                  <td colspan="6" class="text-center text-danger">
-                                      Error loading reports. Please check console for details.
-                                  </td>
-                              </tr>
+                          document.getElementById('latest-report-content').innerHTML = `
+                              <div class="alert alert-danger">
+                                  Error loading reports: ${error.message}
+                              </div>
                           `;
                       }
-                  }
-                  
-                  loadReports();
+                  });
               </script>
           </body>
           </html>
@@ -328,85 +406,3 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-
-  archive:
-    name: Archive to gh-pages branch
-    needs: [test, deploy]
-    runs-on: ubuntu-latest
-    if: always()
-
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Download HTML Report
-        uses: actions/download-artifact@v4
-        with:
-          name: playwright-html-report
-          path: playwright-report/
-
-      - name: Setup Git
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-
-      - name: Archive Report
-        run: |
-          # Create timestamped directory
-          TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
-          RUN_ID="${{ github.run_id }}"
-          mkdir -p gh-pages-content/reports/$TIMESTAMP-$RUN_ID
-          cp -r playwright-report/* gh-pages-content/reports/$TIMESTAMP-$RUN_ID/
-
-          # Update reports index
-          if git show origin/gh-pages:reports-index.json 2>/dev/null; then
-            git show origin/gh-pages:reports-index.json > gh-pages-content/reports-index.json
-            REPORTS_JSON=$(cat gh-pages-content/reports-index.json)
-          else
-            REPORTS_JSON="[]"
-          fi
-
-          # Extract test results summary
-          TOTAL_TESTS=$(grep -o '"total": [0-9]*' playwright-report/data.json | cut -d' ' -f2 || echo 0)
-          PASSED_TESTS=$(grep -o '"passed": [0-9]*' playwright-report/data.json | cut -d' ' -f2 || echo 0)
-          FAILED_TESTS=$(grep -o '"failed": [0-9]*' playwright-report/data.json | cut -d' ' -f2 || echo 0)
-
-          # Create new report entry
-          NEW_ENTRY=$(jq -n \
-            --arg timestamp "$(date -Iseconds)" \
-            --arg directory "$TIMESTAMP-$RUN_ID" \
-            --arg branch "${{ github.ref_name }}" \
-            --arg commit "${{ github.sha }}" \
-            --arg runId "$RUN_ID" \
-            --argjson total "$TOTAL_TESTS" \
-            --argjson passed "$PASSED_TESTS" \
-            --argjson failed "$FAILED_TESTS" \
-            '{
-              timestamp: $timestamp,
-              directory: $directory,
-              branch: $branch,
-              commit: $commit,
-              runId: $runId,
-              total: $total,
-              passed: $passed,
-              failed: $failed,
-              status: (if $failed > 0 then "failed" else "passed" end),
-              url: ("reports/" + $directory + "/index.html")
-            }')
-
-          # Update reports index (keep last 100 reports)
-          echo "$REPORTS_JSON" | jq --argjson new "$NEW_ENTRY" '. = [$new] + . | .[0:100]' > gh-pages-content/reports-index.json
-
-          # Create landing page
-          cp public/index.html gh-pages-content/
-
-      - name: Commit to gh-pages branch
-        run: |
-          git checkout gh-pages 2>/dev/null || git checkout --orphan gh-pages
-          git rm -rf . 2>/dev/null || true
-          cp -r gh-pages-content/* .
-          git add .
-          git commit -m "Update reports with run ${{ github.run_id }}"
-          git push origin gh-pages
