@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Playwright Test Reports</title>
+    <style>
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            margin: 40px auto;
+            max-width: 1200px;
+            padding: 0 20px;
+            background: #f8f9fa;
+        }
+        .header {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+        }
+        .reports-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
+        }
+        .report-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            transition: transform 0.2s;
+        }
+        .report-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
+        .report-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 10px;
+            color: #2d3748;
+        }
+        .report-meta {
+            color: #718096;
+            font-size: 14px;
+            margin-bottom: 15px;
+        }
+        .report-link {
+            display: inline-block;
+            background: #3182ce;
+            color: white !important;
+            padding: 8px 16px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+        .report-link:hover {
+            background: #2c5aa0;
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 500;
+            margin-left: 10px;
+        }
+        .status-success { background: #c6f6d5; color: #22543d; }
+        .status-failure { background: #fed7d7; color: #c53030; }
+        .latest-badge {
+            background: #805ad5;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 500;
+            margin-left: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🧪 Playwright Test Reports</h1>
+        <p>Historical test reports for this repository. Click on any report to view detailed results.</p>
+    </div>
+    <div class="reports-grid" id="reports">
+        <!-- Reports will be populated by JavaScript -->
+    </div>
+    
+    <script>
+        async function loadReports() {
+            try {
+                const response = await fetch('./reports-index.json');
+                const reports = await response.json();
+                
+                const reportsContainer = document.getElementById('reports');
+                reportsContainer.innerHTML = '';
+                
+                reports.forEach((report, index) => {
+                    const card = document.createElement('div');
+                    card.className = 'report-card';
+                    
+                    const status = report.failed > 0 ? 'failure' : 'success';
+                    const statusText = report.failed > 0 ? 'Failed' : 'Passed';
+                    
+                    card.innerHTML = `
+                        <div class="report-title">
+                            Test Run #${report.runId}
+                            ${index === 0 ? '<span class="latest-badge">Latest</span>' : ''}
+                            <span class="status-badge status-${status}">${statusText}</span>
+                        </div>
+                        <div class="report-meta">
+                            <div><strong>Branch:</strong> ${report.branch}</div>
+                            <div><strong>Commit:</strong> ${report.commit.substring(0, 7)}</div>
+                            <div><strong>Date:</strong> ${new Date(report.timestamp).toLocaleString()}</div>
+                            <div><strong>Tests:</strong> ${report.total} total, ${report.passed} passed, ${report.failed} failed</div>
+                        </div>
+                        <a href="./reports/${report.directory}/index.html" class="report-link">
+                            View Report →
+                        </a>
+                    `;
+                    
+                    reportsContainer.appendChild(card);
+                });
+            } catch (error) {
+                console.error('Error loading reports:', error);
+                document.getElementById('reports').innerHTML = '<p>Error loading reports. Please check the console.</p>';
+            }
+        }
+        
+        loadReports();
+    </script>
+</body>
+</html>
