@@ -1,4 +1,4 @@
-name: Playwright Tests with Full History on GitHub Pages
+name: Playwright Tests with CTRF Reports
 
 on:
   push:
@@ -6,11 +6,6 @@ on:
   pull_request:
     branches: [main, master]
   workflow_dispatch:
-
-permissions:
-  contents: write
-  pages: write
-  id-token: write
 
 jobs:
   test:
@@ -30,32 +25,21 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
-      - name: Get Playwright version
-        id: playwright-version
-        run: echo "version=$(npm list @playwright/test --depth=0 --json | jq -r '.dependencies["@playwright/test"].version')" >> $GITHUB_OUTPUT
-
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
-        id: playwright-cache
-        with:
-          path: |
-            ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ steps.playwright-version.outputs.version }}
-          restore-keys: |
-            ${{ runner.os }}-playwright-
-
       - name: Install Playwright Browsers
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: npx playwright install --with-deps
 
-      - name: Install Playwright system dependencies
-        if: steps.playwright-cache.outputs.cache-hit == 'true'
-        run: npx playwright install-deps
-
-      - name: Run Playwright Tests and Generate HTML Report
-        run: npx playwright test --reporter=html
+      - name: Run Playwright Tests
+        run: npx playwright test
         env:
           CI: true
+
+      - name: Upload CTRF Report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ctrf-report
+          path: test-results/ctrf-report.json
+          retention-days: 30
 
       - name: Upload HTML Report
         uses: actions/upload-artifact@v4
@@ -65,344 +49,120 @@ jobs:
           path: playwright-report/
           retention-days: 30
 
-  deploy:
-    name: Deploy to GitHub Pages
-    needs: test
+      - name: Upload Test Results
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: test-results
+          path: test-results/
+          retention-days: 30
+
+  report:
+    name: Process Test Reports
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+    needs: test
+    if: always()
 
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Download HTML Report
+      - name: Download CTRF Report
         uses: actions/download-artifact@v4
         with:
-          name: playwright-html-report
-          path: playwright-report/
+          name: ctrf-report
+          path: reports/
 
-      - name: Prepare Deployment Content
+      - name: Parse and Display Results
         run: |
-          # Create public directory
-          mkdir -p public/reports
+          echo "## 🧪 Test Results Summary" >> $GITHUB_STEP_SUMMARY
 
-          # Get existing reports index if available
-          if [ -f "public/reports-index.json" ]; then
-            REPORTS_JSON=$(cat public/reports-index.json)
+          if [ -f "reports/ctrf-report.json" ]; then
+            # Extract metrics using jq
+            total=$(jq -r '.results.summary.tests' reports/ctrf-report.json)
+            passed=$(jq -r '.results.summary.passed' reports/ctrf-report.json)
+            failed=$(jq -r '.results.summary.failed' reports/ctrf-report.json)
+            skipped=$(jq -r '.results.summary.skipped' reports/ctrf-report.json)
+            duration=$(jq -r '.results.summary.stop - .results.summary.start' reports/ctrf-report.json)
+            
+            echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+            echo "| 📊 Total Tests | $total |" >> $GITHUB_STEP_SUMMARY
+            echo "| ✅ Passed | $passed |" >> $GITHUB_STEP_SUMMARY
+            echo "| ❌ Failed | $failed |" >> $GITHUB_STEP_SUMMARY
+            echo "| ⏭️ Skipped | $skipped |" >> $GITHUB_STEP_SUMMARY
+            echo "| ⏱️ Duration | ${duration}ms |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            
+            # Add status message
+            if [ "$failed" -gt 0 ]; then
+              echo "❌ **Test run completed with failures!**" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              
+              # Extract and display failed tests
+              echo "## 💥 Failed Tests" >> $GITHUB_STEP_SUMMARY
+              echo "| Test Name | Error Message |" >> $GITHUB_STEP_SUMMARY
+              echo "|-----------|---------------|" >> $GITHUB_STEP_SUMMARY
+              
+              # Get failed tests from CTRF report
+              jq -r '.results.tests[] | select(.status == "failed") | "| " + .name + " | " + (.message // "No error message") + " |"' reports/ctrf-report.json >> $GITHUB_STEP_SUMMARY
+              
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "Check the test artifacts for detailed failure information." >> $GITHUB_STEP_SUMMARY
+            else
+              echo "✅ **All tests passed successfully!**" >> $GITHUB_STEP_SUMMARY
+            fi
           else
-            REPORTS_JSON="[]"
+            echo "❌ CTRF report not found!" >> $GITHUB_STEP_SUMMARY
           fi
 
-          # Create unique directory for this run
-          TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
-          RUN_ID="${{ github.run_id }}"
-          mkdir -p public/reports/$RUN_ID
-          cp -r playwright-report/* public/reports/$RUN_ID/
-
-          # Extract test results from the report
-          TOTAL_TESTS=$(jq -r '.stats.total' playwright-report/data.json || echo 0)
-          PASSED_TESTS=$(jq -r '.stats.expected' playwright-report/data.json || echo 0)
-          FAILED_TESTS=$(jq -r '.stats.unexpected' playwright-report/data.json || echo 0)
-
-          # Create new report entry
-          NEW_ENTRY=$(jq -n \
-            --arg timestamp "$(date -Iseconds)" \
-            --arg runId "$RUN_ID" \
-            --arg branch "${{ github.ref_name }}" \
-            --arg commit "${{ github.sha }}" \
-            --argjson total "$TOTAL_TESTS" \
-            --argjson passed "$PASSED_TESTS" \
-            --argjson failed "$FAILED_TESTS" \
-            '{
-              timestamp: $timestamp,
-              runId: $runId,
-              branch: $branch,
-              commit: $commit,
-              total: $total,
-              passed: $passed,
-              failed: $failed,
-              status: (if $failed > 0 then "failed" else "passed" end),
-              url: ("reports/" + $runId + "/index.html")
-            }')
-
-          # Update reports index (keep last 50 reports)
-          echo "$REPORTS_JSON" | jq --argjson new "$NEW_ENTRY" '. = [$new] + . | .[0:50]' > public/reports-index.json
-
-          # Create landing page
-          cat > public/index.html << 'EOF'
-          <!DOCTYPE html>
-          <html lang="en">
-          <head>
-              <meta charset="UTF-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>Playwright Test Reports</title>
-              <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-              <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
-              <style>
-                  body {
-                      background-color: #f8f9fa;
-                  }
-                  .report-card {
-                      transition: all 0.2s ease;
-                      border-left: 4px solid transparent;
-                  }
-                  .report-card:hover {
-                      transform: translateY(-2px);
-                      box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-                  }
-                  .report-card.passed {
-                      border-left-color: #28a745;
-                  }
-                  .report-card.failed {
-                      border-left-color: #dc3545;
-                  }
-                  .status-badge {
-                      font-size: 0.8rem;
-                  }
-                  .commit-hash {
-                      font-family: monospace;
-                      font-size: 0.9rem;
-                  }
-                  .nav-tabs .nav-link.active {
-                      font-weight: 500;
-                  }
-                  .chart-container {
-                      height: 300px;
-                  }
-              </style>
-          </head>
-          <body>
-              <div class="container py-4">
-                  <div class="d-flex justify-content-between align-items-center mb-4">
-                      <h1 class="h3 mb-0">
-                          <i class="bi bi-speedometer2 me-2"></i>Playwright Test Reports
-                      </h1>
-                      <a href="https://playwright.dev" target="_blank" class="btn btn-sm btn-outline-secondary">
-                          <i class="bi bi-box-arrow-up-right"></i> Playwright Docs
-                      </a>
-                  </div>
-
-                  <ul class="nav nav-tabs mb-4" id="reportTabs" role="tablist">
-                      <li class="nav-item" role="presentation">
-                          <button class="nav-link active" id="latest-tab" data-bs-toggle="tab" data-bs-target="#latest" type="button" role="tab">
-                              Latest Report
-                          </button>
-                      </li>
-                      <li class="nav-item" role="presentation">
-                          <button class="nav-link" id="history-tab" data-bs-toggle="tab" data-bs-target="#history" type="button" role="tab">
-                              Report History
-                          </button>
-                      </li>
-                      <li class="nav-item" role="presentation">
-                          <button class="nav-link" id="trends-tab" data-bs-toggle="tab" data-bs-target="#trends" type="button" role="tab">
-                              Trends
-                          </button>
-                      </li>
-                  </ul>
-
-                  <div class="tab-content" id="reportTabsContent">
-                      <div class="tab-pane fade show active" id="latest" role="tabpanel">
-                          <div class="card mb-4">
-                              <div class="card-body">
-                                  <h5 class="card-title" id="latest-report-title">Loading latest report...</h5>
-                                  <div id="latest-report-content"></div>
-                              </div>
-                          </div>
-                      </div>
-
-                      <div class="tab-pane fade" id="history" role="tabpanel">
-                          <div class="card">
-                              <div class="card-body">
-                                  <div class="table-responsive">
-                                      <table class="table table-hover">
-                                          <thead>
-                                              <tr>
-                                                  <th>Date</th>
-                                                  <th>Run ID</th>
-                                                  <th>Branch</th>
-                                                  <th>Commit</th>
-                                                  <th>Results</th>
-                                                  <th>Status</th>
-                                                  <th>Actions</th>
-                                              </tr>
-                                          </thead>
-                                          <tbody id="reports-table-body">
-                                              <tr>
-                                                  <td colspan="7" class="text-center">Loading reports...</td>
-                                              </tr>
-                                          </tbody>
-                                      </table>
-                                  </div>
-                              </div>
-                          </div>
-                      </div>
-
-                      <div class="tab-pane fade" id="trends" role="tabpanel">
-                          <div class="card">
-                              <div class="card-body">
-                                  <div class="chart-container">
-                                      <canvas id="trends-chart"></canvas>
-                                  </div>
-                              </div>
-                          </div>
-                      </div>
-                  </div>
-              </div>
-
-              <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-              <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-              <script>
-                  document.addEventListener('DOMContentLoaded', async function() {
-                      try {
-                          // Load reports data
-                          const response = await fetch('reports-index.json');
-                          const reports = await response.json();
-                          
-                          if (reports.length === 0) {
-                              document.getElementById('latest-report-title').textContent = 'No reports available';
-                              document.getElementById('latest-report-content').innerHTML = 
-                                  '<div class="alert alert-info">No test reports have been generated yet.</div>';
-                              return;
-                          }
-
-                          // Display latest report
-                          const latest = reports[0];
-                          document.getElementById('latest-report-title').textContent = 
-                              `Test Run #${latest.runId} - ${new Date(latest.timestamp).toLocaleString()}`;
-                          
-                          document.getElementById('latest-report-content').innerHTML = `
-                              <div class="mb-3">
-                                  <span class="badge bg-secondary">${latest.branch}</span>
-                                  <span class="badge bg-dark commit-hash ms-2">${latest.commit.substring(0, 7)}</span>
-                              </div>
-                              <div class="d-flex mb-3">
-                                  <div class="me-4">
-                                      <h6 class="text-muted">Total Tests</h6>
-                                      <h3>${latest.total}</h3>
-                                  </div>
-                                  <div class="me-4">
-                                      <h6 class="text-success">Passed</h6>
-                                      <h3 class="text-success">${latest.passed}</h3>
-                                  </div>
-                                  <div>
-                                      <h6 class="${latest.failed > 0 ? 'text-danger' : 'text-muted'}">Failed</h6>
-                                      <h3 class="${latest.failed > 0 ? 'text-danger' : 'text-muted'}">${latest.failed}</h3>
-                                  </div>
-                              </div>
-                              <a href="${latest.url}" class="btn btn-primary">
-                                  <i class="bi bi-file-earmark-text"></i> View Full Report
-                              </a>
-                          `;
-
-                          // Populate reports table
-                          const tbody = document.getElementById('reports-table-body');
-                          tbody.innerHTML = reports.map(report => `
-                              <tr>
-                                  <td>${new Date(report.timestamp).toLocaleString()}</td>
-                                  <td>#${report.runId}</td>
-                                  <td>${report.branch}</td>
-                                  <td><span class="commit-hash">${report.commit.substring(0, 7)}</span></td>
-                                  <td>${report.passed} / ${report.total}</td>
-                                  <td>
-                                      <span class="badge rounded-pill ${report.status === 'passed' ? 'bg-success' : 'bg-danger'}">
-                                          ${report.status === 'passed' ? 'Passed' : 'Failed'}
-                                      </span>
-                                  </td>
-                                  <td>
-                                      <a href="${report.url}" class="btn btn-sm btn-outline-primary">
-                                          <i class="bi bi-eye"></i> View
-                                      </a>
-                                  </td>
-                              </tr>
-                          `).join('');
-
-                          // Create trends chart
-                          const last10 = reports.slice(0, 10).reverse();
-                          const ctx = document.getElementById('trends-chart').getContext('2d');
-                          new Chart(ctx, {
-                              type: 'line',
-                              data: {
-                                  labels: last10.map(r => `Run #${r.runId}`),
-                                  datasets: [
-                                      {
-                                          label: 'Pass Rate (%)',
-                                          data: last10.map(r => Math.round((r.passed / r.total) * 100)),
-                                          borderColor: '#28a745',
-                                          backgroundColor: 'rgba(40, 167, 69, 0.1)',
-                                          tension: 0.3,
-                                          yAxisID: 'y'
-                                      },
-                                      {
-                                          label: 'Failed Tests',
-                                          data: last10.map(r => r.failed),
-                                          borderColor: '#dc3545',
-                                          backgroundColor: 'rgba(220, 53, 69, 0.1)',
-                                          tension: 0.3,
-                                          yAxisID: 'y1'
-                                      }
-                                  ]
-                              },
-                              options: {
-                                  responsive: true,
-                                  interaction: {
-                                      mode: 'index',
-                                      intersect: false
-                                  },
-                                  scales: {
-                                      y: {
-                                          type: 'linear',
-                                          display: true,
-                                          position: 'left',
-                                          title: {
-                                              display: true,
-                                              text: 'Pass Rate (%)'
-                                          },
-                                          min: 0,
-                                          max: 100
-                                      },
-                                      y1: {
-                                          type: 'linear',
-                                          display: true,
-                                          position: 'right',
-                                          title: {
-                                              display: true,
-                                              text: 'Failed Tests'
-                                          },
-                                          min: 0,
-                                          grid: {
-                                              drawOnChartArea: false
-                                          }
-                                      }
-                                  }
-                              }
-                          });
-
-                      } catch (error) {
-                          console.error('Error loading reports:', error);
-                          document.getElementById('latest-report-content').innerHTML = `
-                              <div class="alert alert-danger">
-                                  Error loading reports: ${error.message}
-                              </div>
-                          `;
-                      }
-                  });
-              </script>
-          </body>
-          </html>
-          EOF
-
-      - name: Setup Pages
-        uses: actions/configure-pages@v4
-
-      - name: Upload Pages Artifact
-        uses: actions/upload-pages-artifact@v3
+      - name: Comment PR with Results
+        uses: actions/github-script@v7
+        if: github.event_name == 'pull_request'
         with:
-          path: "public"
+          script: |
+            const fs = require('fs');
 
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+            try {
+              const reportPath = 'reports/ctrf-report.json';
+              if (fs.existsSync(reportPath)) {
+                const report = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+                const summary = report.results.summary;
+                
+                const passRate = ((summary.passed / summary.tests) * 100).toFixed(1);
+                
+                let comment = `## 🧪 Playwright Test Results
+                
+                | Metric | Value |
+                |--------|-------|
+                | 📊 Total Tests | ${summary.tests} |
+                | ✅ Passed | ${summary.passed} |
+                | ❌ Failed | ${summary.failed} |
+                | ⏭️ Skipped | ${summary.skipped} |
+                | 📈 Pass Rate | ${passRate}% |
+                | ⏱️ Duration | ${summary.stop - summary.start}ms |
+                `;
+                
+                if (summary.failed > 0) {
+                  comment += `\n❌ **${summary.failed} test(s) failed!**\n\n## 💥 Failed Tests\n\n| Test Name | Error Message |\n|-----------|---------------|\n`;
+                  
+                  const failedTests = report.results.tests.filter(test => test.status === 'failed');
+                  failedTests.forEach(test => {
+                    const errorMsg = (test.message || 'No error message').replace(/\|/g, '\\|').replace(/\n/g, ' ');
+                    comment += `| ${test.name} | ${errorMsg} |\n`;
+                  });
+                  
+                  comment += `\nCheck the [workflow run](${context.payload.pull_request.html_url}/checks) for details.`;
+                } else {
+                  comment += '\n✅ **All tests passed!** Great job! 🎉';
+                }
+                
+                comment += '\n\n---\n*Generated by Playwright CTRF Reporter*';
+                
+                github.rest.issues.createComment({
+                  issue_number: context.issue.number,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  body: comment
+                });
+              }
+            } catch (error) {
+              console.log('Error processing report:', error);
+            }
