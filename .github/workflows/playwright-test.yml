@@ -269,51 +269,31 @@ jobs:
               <script>
                   async function loadTestResults() {
                       try {
-                          const response = await fetch('reports/');
-                          const html = await response.text();
+                          // Try to fetch the test results index
+                          const response = await fetch('reports/index.json');
+                          const testResults = await response.json();
                           
-                          // Parse directory listing to find test folders
-                          const parser = new DOMParser();
-                          const doc = parser.parseFromString(html, 'text/html');
-                          const links = doc.querySelectorAll('a');
-                          
-                          const testFolders = [];
-                          links.forEach(link => {
-                              const href = link.getAttribute('href');
-                              if (href && href.match(/^\d{8}-\d{6}-[a-f0-9]{7}\/$/)) {
-                                  testFolders.push(href.replace('/', ''));
-                              }
-                          });
-                          
-                          if (testFolders.length === 0) {
+                          if (testResults.length === 0) {
                               document.querySelector('.loading').style.display = 'none';
                               document.getElementById('noResults').style.display = 'block';
                               return;
                           }
                           
                           // Sort by newest first
-                          testFolders.sort((a, b) => b.localeCompare(a));
+                          testResults.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
                           
                           const testGrid = document.getElementById('testGrid');
                           document.querySelector('.loading').style.display = 'none';
                           
-                          for (const folder of testFolders) {
-                              try {
-                                  const metadataResponse = await fetch(`reports/${folder}/metadata.json`);
-                                  const metadata = await metadataResponse.json();
-                                  
-                                  const card = createTestCard(metadata, folder);
-                                  testGrid.appendChild(card);
-                              } catch (error) {
-                                  console.error(`Error loading metadata for ${folder}:`, error);
-                                  // Create a basic card without metadata
-                                  const basicCard = createBasicTestCard(folder);
-                                  testGrid.appendChild(basicCard);
-                              }
+                          for (const testResult of testResults) {
+                              const card = createTestCard(testResult, testResult.id);
+                              testGrid.appendChild(card);
                           }
                       } catch (error) {
                           console.error('Error loading test results:', error);
-                          document.querySelector('.loading').textContent = 'Error loading test results';
+                          document.querySelector('.loading').style.display = 'none';
+                          document.getElementById('noResults').style.display = 'block';
+                          document.getElementById('noResults').textContent = 'No test results found. Run some tests to see them here!';
                       }
                   }
                   
@@ -397,6 +377,40 @@ jobs:
           cp -r temp-reports/${{ steps.generate-id.outputs.unique_id }} gh-pages/reports/
 
           cd gh-pages
+
+          # Create or update the reports index
+          if [ ! -f reports/index.json ]; then
+            echo "[]" > reports/index.json
+          fi
+
+          # Add current test result to index
+          python3 << 'EOF'
+          import json
+          import os
+
+          # Read existing index
+          with open('reports/index.json', 'r') as f:
+              results = json.load(f)
+
+          # Read current test metadata
+          with open('reports/${{ steps.generate-id.outputs.unique_id }}/metadata.json', 'r') as f:
+              metadata = json.load(f)
+
+          # Add to results if not already present
+          if not any(r['id'] == metadata['id'] for r in results):
+              results.append(metadata)
+
+          # Sort by timestamp (newest first)
+          results.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
+
+          # Keep only last 50 results to avoid too large files
+          results = results[:50]
+
+          # Save updated index
+          with open('reports/index.json', 'w') as f:
+              json.dump(results, f, indent=2)
+          EOF
+
           git add .
           git commit -m "Add test results for ${{ steps.generate-id.outputs.unique_id }}" || exit 0
           git push
