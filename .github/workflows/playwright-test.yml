@@ -1,410 +1,152 @@
-name: Playwright Tests with CTRF Reports
+name: Playwright CI & GitHub Pages Report
 
 on:
   push:
-    branches: [main, master]
-  pull_request:
-    branches: [main, master]
-  workflow_dispatch:
-
-# Add permissions for GitHub Pages and repository writes
-permissions:
-  contents: write
-  pages: write
-  id-token: write
-  pull-requests: write
+    branches:
+      - main
 
 jobs:
-  test:
-    name: Run Playwright Tests
+  test-and-publish:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Repository
+      - name: Checkout main branch
         uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
-          cache: "npm"
+          node-version: '20'
 
-      - name: Install Dependencies
+      - name: Install dependencies
         run: npm ci
 
-      - name: Install Playwright Browsers
-        run: npx playwright install --with-deps
+      - name: Run Playwright tests
+        run: npx playwright test --reporter html
 
-      - name: Run Playwright Tests
-        run: npx playwright test
-        env:
-          CI: true
+      - name: Generate Unique Report ID
+        id: vars
+        run: echo "id=run-$(date +%s)" >> $GITHUB_OUTPUT
 
-      - name: Upload CTRF Report
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: ctrf-report
-          path: test-results/ctrf-report.json
-          retention-days: 30
+      - name: Copy HTML report to folder
+        run: |
+          mkdir ${{ steps.vars.outputs.id }}
+          cp -r playwright-report/* ${{ steps.vars.outputs.id }}/
 
-      - name: Upload HTML Report
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: playwright-html-report
-          path: playwright-report/
-          retention-days: 30
+      - name: Install jq
+        run: sudo apt-get install -y jq
 
-      - name: Upload Test Results
-        uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          name: test-results
-          path: test-results/
-          retention-days: 30
-
-  report:
-    name: Process Test Reports
-    runs-on: ubuntu-latest
-    needs: test
-    if: always()
-
-    steps:
-      - name: Checkout Repository
+      - name: Checkout gh-pages branch
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: gh-pages
+          path: gh-pages
 
-      - name: Download CTRF Report
-        uses: actions/download-artifact@v4
-        with:
-          name: ctrf-report
-          path: reports/
-
-      - name: Download HTML Report
-        uses: actions/download-artifact@v4
-        with:
-          name: playwright-html-report
-          path: html-report/
-
-      # - name: Parse and Display Results
-      #   run: |
-      #     echo "## 🧪 Test Results Summary" >> $GITHUB_STEP_SUMMARY
-
-      #     if [ -f "reports/ctrf-report.json" ]; then
-      #       # Extract metrics using jq
-      #       total=$(jq -r '.results.summary.tests' reports/ctrf-report.json)
-      #       passed=$(jq -r '.results.summary.passed' reports/ctrf-report.json)
-      #       failed=$(jq -r '.results.summary.failed' reports/ctrf-report.json)
-      #       skipped=$(jq -r '.results.summary.skipped' reports/ctrf-report.json)
-      #       duration=$(jq -r '.results.summary.stop - .results.summary.start' reports/ctrf-report.json)
-
-      #       echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
-      #       echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
-      #       echo "| 📊 Total Tests | $total |" >> $GITHUB_STEP_SUMMARY
-      #       echo "| ✅ Passed | $passed |" >> $GITHUB_STEP_SUMMARY
-      #       echo "| ❌ Failed | $failed |" >> $GITHUB_STEP_SUMMARY
-      #       echo "| ⏭️ Skipped | $skipped |" >> $GITHUB_STEP_SUMMARY
-      #       echo "| ⏱️ Duration | ${duration}ms |" >> $GITHUB_STEP_SUMMARY
-      #       echo "" >> $GITHUB_STEP_SUMMARY
-
-      #       # Add status message
-      #       if [ "$failed" -gt 0 ]; then
-      #         echo "❌ **Test run completed with failures!**" >> $GITHUB_STEP_SUMMARY
-      #         echo "" >> $GITHUB_STEP_SUMMARY
-
-      #         # Extract and display failed tests
-      #         echo "## 💥 Failed Tests" >> $GITHUB_STEP_SUMMARY
-      #         echo "| Test Name | Error Message |" >> $GITHUB_STEP_SUMMARY
-      #         echo "|-----------|---------------|" >> $GITHUB_STEP_SUMMARY
-
-      #         # Get failed tests from CTRF report
-      #         jq -r '.results.tests[] | select(.status == "failed") | "| " + .name + " | " + (.message // "No error message") + " |"' reports/ctrf-report.json >> $GITHUB_STEP_SUMMARY
-
-      #         echo "" >> $GITHUB_STEP_SUMMARY
-      #         echo "Check the test artifacts for detailed failure information." >> $GITHUB_STEP_SUMMARY
-      #       else
-      #         echo "✅ **All tests passed successfully!**" >> $GITHUB_STEP_SUMMARY
-      #       fi
-      #     else
-      #       echo "❌ CTRF report not found!" >> $GITHUB_STEP_SUMMARY
-      #     fi
-
-      - name: Create Report Structure
+      - name: Sync new report to gh-pages and update index.html
         run: |
-          # Create a reports directory structure
-          mkdir -p reports/${{ github.run_id }}
+          timestamp=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          entry="{\"id\": \"${{ steps.vars.outputs.id }}\", \"timestamp\": \"$timestamp\"}"
 
-          # Copy HTML report to run-specific directory
-          if [ -d "html-report" ]; then
-            cp -r html-report/* reports/${{ github.run_id }}/
+          cd gh-pages
+
+          # Copy report
+          mkdir -p ${{ steps.vars.outputs.id }}
+          cp -r ../${{ steps.vars.outputs.id }}/* ${{ steps.vars.outputs.id }}/
+
+          # Ensure index.json exists
+          if [ ! -f index.json ]; then
+            echo "[]" > index.json
           fi
 
-          # Copy CTRF report for API access
-          if [ -f "reports/ctrf-report.json" ]; then
-            cp reports/ctrf-report.json reports/${{ github.run_id }}/ctrf-report.json
-          fi
+          # Append to index.json
+          jq ". + [$entry]" index.json > tmp.json && mv tmp.json index.json
 
-          # Create an index.html for the current run
-          cat > ./index.html << 'EOF'
-          <!DOCTYPE html>
-          <html lang="en">
-          <head>
-              <meta charset="UTF-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>Test Report - Run ${{ github.run_id }}</title>
-              <style>
-                  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 40px; }
-                  .container { max-width: 800px; margin: 0 auto; }
-                  .header { text-align: center; margin-bottom: 40px; }
-                  .card { background: #f8f9fa; border-radius: 8px; padding: 20px; margin: 20px 0; }
-                  .btn { display: inline-block; padding: 10px 20px; background: #0066cc; color: white; text-decoration: none; border-radius: 5px; margin: 10px 5px; }
-                  .btn:hover { background: #0052a3; }
-              </style>
-          </head>
-          <body>
-              <div class="container">
-                  <div class="header">
-                      <h1>🧪 Test Report - Run ${{ github.run_id }}</h1>
-                      <p>Test execution results and reports</p>
-                  </div>
+          # Generate index.html
+          cat > index.html <<EOF
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Playwright Test Reports</title>
+    <style>
+      body {
+        font-family: sans-serif;
+        margin: 2rem;
+        background: #f4f4f4;
+      }
+      h1 {
+        text-align: center;
+        color: #333;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+        gap: 1rem;
+        margin-top: 2rem;
+      }
+      .card {
+        background: white;
+        padding: 1rem;
+        border-radius: 10px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+      }
+      .card h2 {
+        font-size: 1.1rem;
+        margin: 0 0 0.5rem;
+      }
+      .card p {
+        color: #666;
+        font-size: 0.9rem;
+      }
+      .cta {
+        margin-top: 1rem;
+        text-align: right;
+      }
+      .cta a {
+        text-decoration: none;
+        background: #007acc;
+        color: white;
+        padding: 0.5rem 1rem;
+        border-radius: 5px;
+        transition: background 0.2s;
+      }
+      .cta a:hover {
+        background: #005fa3;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Playwright Test Reports</h1>
+    <div class="grid">
+EOF
 
-                  <div class="card">
-                      <h2>📊 Available Reports</h2>
-                      <a href="./index.html" class="btn">📝 HTML Report</a>
-                      <a href="./ctrf-report.json" class="btn">📋 JSON Report</a>
-                  </div>
+          jq -c '.[]' index.json | while read -r run; do
+            id=$(echo "$run" | jq -r '.id')
+            timestamp=$(echo "$run" | jq -r '.timestamp')
+            cat >> index.html <<EOF
+      <div class="card">
+        <h2>$id</h2>
+        <p>Run Date: $timestamp</p>
+        <div class="cta">
+          <a href="./$id/index.html" target="_blank">View Report</a>
+        </div>
+      </div>
+EOF
+          done
 
-                  <div class="card">
-                      <h2>📈 Results Summary</h2>
-                      <p>Run ID: ${{ github.run_id }}</p>
-                      <p>Date: $(date)</p>
-                      <div id="results-summary">Loading...</div>
-                  </div>
-              </div>
+          cat >> index.html <<EOF
+    </div>
+  </body>
+</html>
+EOF
 
-              <script>
-                  // Load and display CTRF results
-                  fetch('./ctrf-report.json')
-                      .then(response => response.json())
-                      .then(data => {
-                          const summary = data.results.summary;
-                          const html = `
-                              <table style="width: 100%; border-collapse: collapse;">
-                                  <tr><td style="padding: 8px; border: 1px solid #ddd;"><strong>Total Tests:</strong></td><td style="padding: 8px; border: 1px solid #ddd;">${summary.tests}</td></tr>
-                                  <tr><td style="padding: 8px; border: 1px solid #ddd;"><strong>Passed:</strong></td><td style="padding: 8px; border: 1px solid #ddd; color: green;">${summary.passed}</td></tr>
-                                  <tr><td style="padding: 8px; border: 1px solid #ddd;"><strong>Failed:</strong></td><td style="padding: 8px; border: 1px solid #ddd; color: red;">${summary.failed}</td></tr>
-                                  <tr><td style="padding: 8px; border: 1px solid #ddd;"><strong>Skipped:</strong></td><td style="padding: 8px; border: 1px solid #ddd;">${summary.skipped}</td></tr>
-                                  <tr><td style="padding: 8px; border: 1px solid #ddd;"><strong>Duration:</strong></td><td style="padding: 8px; border: 1px solid #ddd;">${summary.stop - summary.start}ms</td></tr>
-                              </table>
-                          `;
-                          document.getElementById('results-summary').innerHTML = html;
-                      })
-                      .catch(error => {
-                          document.getElementById('results-summary').innerHTML = 'Unable to load test results.';
-                      });
-              </script>
-          </body>
-          </html>
-          EOF
-
-      - name: Create Main Index
-        run: |
-          mkdir -p reports
-          cat > reports/index.html << 'EOF'
-          <!DOCTYPE html>
-          <html lang="en">
-          <head>
-              <meta charset="UTF-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>Playwright Test Reports</title>
-              <style>
-                  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 40px; background: #f4f6f8; }
-                  .container { max-width: 1200px; margin: 0 auto; }
-                  .header { text-align: center; margin-bottom: 40px; }
-                  .reports-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
-                  .report-card { 
-                      background: white; 
-                      border-radius: 8px; 
-                      padding: 20px; 
-                      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
-                      display: flex;
-                      flex-direction: column;
-                      justify-content: space-between;
-                  }
-                  .report-card h3 { margin: 0 0 10px 0; font-size: 18px; }
-                  .btn { 
-                      display: inline-block; 
-                      padding: 8px 16px; 
-                      background: #007acc; 
-                      color: white; 
-                      text-decoration: none; 
-                      border-radius: 5px; 
-                      text-align: center;
-                  }
-                  .btn:hover { background: #005fa3; }
-                  .status { 
-                      display: inline-block;
-                      padding: 4px 8px;
-                      border-radius: 4px;
-                      font-size: 12px;
-                      font-weight: bold;
-                      margin-top: 10px;
-                  }
-                  .status-passed { background: #28a745; color: white; }
-                  .status-failed { background: #dc3545; color: white; }
-                  .status-loading { background: #ffc107; color: black; }
-                  .date { font-size: 14px; color: #555; margin-bottom: 10px; }
-                  .stats { font-size: 14px; margin-top: 10px; }
-              </style>
-          </head>
-          <body>
-              <div class="container">
-                  <div class="header">
-                      <h1>🧪 Playwright Test Reports</h1>
-                      <p>Historical test execution results</p>
-                  </div>
-                  
-                  <div class="reports-grid" id="reports-grid">
-                      Loading reports...
-                  </div>
-              </div>
-              
-              <script>
-                  async function loadReports() {
-                      const response = await fetch('https://api.github.com/repos/${{ github.repository }}/contents/reports');
-                      const items = await response.json();
-                      const grid = document.getElementById('reports-grid');
-                      grid.innerHTML = '';
-
-                      const dirs = items.filter(item => item.type === 'dir');
-                      dirs.sort((a, b) => b.name.localeCompare(a.name)).reverse(); // Newest first
-
-                      for (const dir of dirs) {
-                          const timestamp = parseInt(dir.name);
-                          const dateStr = isNaN(timestamp)
-                              ? 'Invalid date'
-                              : new Date(timestamp).toLocaleString();
-
-                          const card = document.createElement('div');
-                          card.className = 'report-card';
-                          card.innerHTML = `
-                              <h3>Run ID: ${dir.name}</h3>
-                              <div class="date">📅 ${dateStr}</div>
-                              <div class="status status-loading">Loading...</div>
-                              <div class="stats">⏳ Loading stats...</div>
-                              <a class="btn" href="./${dir.name}/index.html" target="_blank">View Report</a>
-                          `;
-                          grid.appendChild(card);
-
-                          try {
-                              const res = await fetch(`./${dir.name}/ctrf-report.json`);
-                              const data = await res.json();
-
-                              const passed = data.results.summary.passed || 0;
-                              const failed = data.results.summary.failed || 0;
-                              const skipped = data.results.summary.skipped || 0;
-                              const total = passed + failed + skipped;
-
-                              const duration = data.results.summary.duration || 0;
-                              const durationSec = (duration / 1000).toFixed(2) + 's';
-
-                              const status = failed > 0 ? 'failed' : 'passed';
-                              const statusDiv = card.querySelector('.status');
-                              const statsDiv = card.querySelector('.stats');
-
-                              statusDiv.className = `status status-${status}`;
-                              statusDiv.textContent = status.toUpperCase();
-
-                              statsDiv.innerHTML = `
-                                  ✅ Passed: ${passed} <br/>
-                                  ❌ Failed: ${failed} <br/>
-                                  🚫 Skipped: ${skipped} <br/>
-                                  🧪 Total: ${total} <br/>
-                                  ⏱️ Duration: ${durationSec}
-                              `;
-                          } catch (err) {
-                              const statusDiv = card.querySelector('.status');
-                              const statsDiv = card.querySelector('.stats');
-                              statusDiv.className = 'status status-failed';
-                              statusDiv.textContent = 'ERROR';
-                              statsDiv.innerHTML = '❌ Failed to load ctrf-report.json';
-                          }
-                      }
-                  }
-
-                  loadReports();
-              </script>
-          </body>
-          </html>
-          EOF
-
-      - name: Deploy Reports
-        uses: peaceiris/actions-gh-pages@v3
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./reports
-          publish_branch: gh-pages
-          keep_files: true
-          enable_jekyll: false
-          commit_message: "Update test reports from run ${{ github.run_id }}"
-          user_name: "github-actions[bot]"
-          user_email: "github-actions[bot]@users.noreply.github.com"
-
-      - name: Comment PR with Results
-        uses: actions/github-script@v7
-        if: github.event_name == 'pull_request'
-        with:
-          script: |
-            const fs = require('fs');
-
-            try {
-              const reportPath = 'reports/ctrf-report.json';
-              if (fs.existsSync(reportPath)) {
-                const report = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
-                const summary = report.results.summary;
-                
-                const passRate = ((summary.passed / summary.tests) * 100).toFixed(1);
-                const reportsUrl = `https://${context.repo.owner}.github.io/${context.repo.repo}/reports/${{ github.run_id }}/index.html`;
-                
-                let comment = `## 🧪 Playwright Test Results
-                
-                | Metric | Value |
-                |--------|-------|
-                | 📊 Total Tests | ${summary.tests} |
-                | ✅ Passed | ${summary.passed} |
-                | ❌ Failed | ${summary.failed} |
-                | ⏭️ Skipped | ${summary.skipped} |
-                | 📈 Pass Rate | ${passRate}% |
-                | ⏱️ Duration | ${summary.stop - summary.start}ms |
-                
-                📊 **[View Detailed Report](${reportsUrl})**
-                `;
-                
-                if (summary.failed > 0) {
-                  comment += `\n❌ **${summary.failed} test(s) failed!**\n\n## 💥 Failed Tests\n\n| Test Name | Error Message |\n|-----------|---------------|\n`;
-                  
-                  const failedTests = report.results.tests.filter(test => test.status === 'failed');
-                  failedTests.forEach(test => {
-                    const errorMsg = (test.message || 'No error message').replace(/\|/g, '\\|').replace(/\n/g, ' ');
-                    comment += `| ${test.name} | ${errorMsg} |\n`;
-                  });
-                  
-                  comment += `\nCheck the [detailed report](${reportsUrl}) for more information.`;
-                } else {
-                  comment += '\n✅ **All tests passed!** Great job! 🎉';
-                }
-                
-                comment += '\n\n---\n*Generated by Playwright CTRF Reporter*';
-                
-                github.rest.issues.createComment({
-                  issue_number: context.issue.number,
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  body: comment
-                });
-              }
-            } catch (error) {
-              console.log('Error processing report:', error);
-            }
+          # Commit and push
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add .
+          git commit -m "Add Playwright report ${{ steps.vars.outputs.id }}" || echo "No changes to commit"
+          git push origin gh-pages
