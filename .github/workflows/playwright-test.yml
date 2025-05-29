@@ -87,6 +87,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: test
     if: always()
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
       - name: Checkout Repository
@@ -425,9 +428,6 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-        environment:
-          name: github-pages
-          url: ${{ steps.deployment.outputs.page_url }}
 
   # Separate job to commit to gh-pages branch (for backup/history)
   commit-to-gh-pages:
