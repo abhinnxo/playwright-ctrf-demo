@@ -131,83 +131,83 @@ jobs:
             echo "❌ CTRF report not found!" >> $GITHUB_STEP_SUMMARY
           fi
 
-      - name: Create Report Structure
-        run: |
-          # Create a reports directory structure
-          mkdir -p reports/${{ github.run_id }}
+      # - name: Create Report Structure
+      #   run: |
+      #     # Create a reports directory structure
+      #     mkdir -p reports/${{ github.run_id }}
 
-          # Copy HTML report to run-specific directory
-          if [ -d "html-report" ]; then
-            cp -r html-report/* reports/${{ github.run_id }}/
-          fi
+      #     # Copy HTML report to run-specific directory
+      #     if [ -d "html-report" ]; then
+      #       cp -r html-report/* reports/${{ github.run_id }}/
+      #     fi
 
-          # Copy CTRF report for API access
-          if [ -f "reports/ctrf-report.json" ]; then
-            cp reports/ctrf-report.json reports/${{ github.run_id }}/ctrf-report.json
-          fi
+      #     # Copy CTRF report for API access
+      #     if [ -f "reports/ctrf-report.json" ]; then
+      #       cp reports/ctrf-report.json reports/${{ github.run_id }}/ctrf-report.json
+      #     fi
 
-          # Create an index.html for the current run
-          cat > reports/${{ github.run_id }}/index.html << 'EOF'
-          <!DOCTYPE html>
-          <html lang="en">
-          <head>
-              <meta charset="UTF-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>Test Report - Run ${{ github.run_id }}</title>
-              <style>
-                  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 40px; }
-                  .container { max-width: 800px; margin: 0 auto; }
-                  .header { text-align: center; margin-bottom: 40px; }
-                  .card { background: #f8f9fa; border-radius: 8px; padding: 20px; margin: 20px 0; }
-                  .btn { display: inline-block; padding: 10px 20px; background: #0066cc; color: white; text-decoration: none; border-radius: 5px; margin: 10px 5px; }
-                  .btn:hover { background: #0052a3; }
-              </style>
-          </head>
-          <body>
-              <div class="container">
-                  <div class="header">
-                      <h1>🧪 Test Report - Run ${{ github.run_id }}</h1>
-                      <p>Test execution results and reports</p>
-                  </div>
-                  
-                  <div class="card">
-                      <h2>📊 Available Reports</h2>
-                      <a href="./index.html" class="btn">📝 HTML Report</a>
-                      <a href="./ctrf-report.json" class="btn">📋 JSON Report</a>
-                  </div>
-                  
-                  <div class="card">
-                      <h2>📈 Results Summary</h2>
-                      <p>Run ID: ${{ github.run_id }}</p>
-                      <p>Date: $(date)</p>
-                      <div id="results-summary">Loading...</div>
-                  </div>
-              </div>
-              
-              <script>
-                  // Load and display CTRF results
-                  fetch('./ctrf-report.json')
-                      .then(response => response.json())
-                      .then(data => {
-                          const summary = data.results.summary;
-                          const html = `
-                              <table style="width: 100%; border-collapse: collapse;">
-                                  <tr><td style="padding: 8px; border: 1px solid #ddd;"><strong>Total Tests:</strong></td><td style="padding: 8px; border: 1px solid #ddd;">${summary.tests}</td></tr>
-                                  <tr><td style="padding: 8px; border: 1px solid #ddd;"><strong>Passed:</strong></td><td style="padding: 8px; border: 1px solid #ddd; color: green;">${summary.passed}</td></tr>
-                                  <tr><td style="padding: 8px; border: 1px solid #ddd;"><strong>Failed:</strong></td><td style="padding: 8px; border: 1px solid #ddd; color: red;">${summary.failed}</td></tr>
-                                  <tr><td style="padding: 8px; border: 1px solid #ddd;"><strong>Skipped:</strong></td><td style="padding: 8px; border: 1px solid #ddd;">${summary.skipped}</td></tr>
-                                  <tr><td style="padding: 8px; border: 1px solid #ddd;"><strong>Duration:</strong></td><td style="padding: 8px; border: 1px solid #ddd;">${summary.stop - summary.start}ms</td></tr>
-                              </table>
-                          `;
-                          document.getElementById('results-summary').innerHTML = html;
-                      })
-                      .catch(error => {
-                          document.getElementById('results-summary').innerHTML = 'Unable to load test results.';
-                      });
-              </script>
-          </body>
-          </html>
-          EOF
+      #     # Create an index.html for the current run
+      #     cat > ./index.html << 'EOF'
+      #     <!DOCTYPE html>
+      #     <html lang="en">
+      #     <head>
+      #         <meta charset="UTF-8">
+      #         <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      #         <title>Test Report - Run ${{ github.run_id }}</title>
+      #         <style>
+      #             body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 40px; }
+      #             .container { max-width: 800px; margin: 0 auto; }
+      #             .header { text-align: center; margin-bottom: 40px; }
+      #             .card { background: #f8f9fa; border-radius: 8px; padding: 20px; margin: 20px 0; }
+      #             .btn { display: inline-block; padding: 10px 20px; background: #0066cc; color: white; text-decoration: none; border-radius: 5px; margin: 10px 5px; }
+      #             .btn:hover { background: #0052a3; }
+      #         </style>
+      #     </head>
+      #     <body>
+      #         <div class="container">
+      #             <div class="header">
+      #                 <h1>🧪 Test Report - Run ${{ github.run_id }}</h1>
+      #                 <p>Test execution results and reports</p>
+      #             </div>
+
+      #             <div class="card">
+      #                 <h2>📊 Available Reports</h2>
+      #                 <a href="./index.html" class="btn">📝 HTML Report</a>
+      #                 <a href="./ctrf-report.json" class="btn">📋 JSON Report</a>
+      #             </div>
+
+      #             <div class="card">
+      #                 <h2>📈 Results Summary</h2>
+      #                 <p>Run ID: ${{ github.run_id }}</p>
+      #                 <p>Date: $(date)</p>
+      #                 <div id="results-summary">Loading...</div>
+      #             </div>
+      #         </div>
+
+      #         <script>
+      #             // Load and display CTRF results
+      #             fetch('./ctrf-report.json')
+      #                 .then(response => response.json())
+      #                 .then(data => {
+      #                     const summary = data.results.summary;
+      #                     const html = `
+      #                         <table style="width: 100%; border-collapse: collapse;">
+      #                             <tr><td style="padding: 8px; border: 1px solid #ddd;"><strong>Total Tests:</strong></td><td style="padding: 8px; border: 1px solid #ddd;">${summary.tests}</td></tr>
+      #                             <tr><td style="padding: 8px; border: 1px solid #ddd;"><strong>Passed:</strong></td><td style="padding: 8px; border: 1px solid #ddd; color: green;">${summary.passed}</td></tr>
+      #                             <tr><td style="padding: 8px; border: 1px solid #ddd;"><strong>Failed:</strong></td><td style="padding: 8px; border: 1px solid #ddd; color: red;">${summary.failed}</td></tr>
+      #                             <tr><td style="padding: 8px; border: 1px solid #ddd;"><strong>Skipped:</strong></td><td style="padding: 8px; border: 1px solid #ddd;">${summary.skipped}</td></tr>
+      #                             <tr><td style="padding: 8px; border: 1px solid #ddd;"><strong>Duration:</strong></td><td style="padding: 8px; border: 1px solid #ddd;">${summary.stop - summary.start}ms</td></tr>
+      #                         </table>
+      #                     `;
+      #                     document.getElementById('results-summary').innerHTML = html;
+      #                 })
+      #                 .catch(error => {
+      #                     document.getElementById('results-summary').innerHTML = 'Unable to load test results.';
+      #                 });
+      #         </script>
+      #     </body>
+      #     </html>
+      #     EOF
 
       - name: Create Main Index
         run: |
@@ -392,20 +392,3 @@ jobs:
             } catch (error) {
               console.log('Error processing report:', error);
             }
-
-  # Optional: Setup GitHub Pages job for better control
-  deploy-pages:
-    name: Deploy GitHub Pages
-    runs-on: ubuntu-latest
-    needs: report
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
-
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
-        if: false # Disabled since we're using peaceiris/actions-gh-pages
