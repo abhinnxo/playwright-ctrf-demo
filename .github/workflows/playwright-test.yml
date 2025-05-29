@@ -211,7 +211,7 @@ jobs:
 
       - name: Create Main Index
         run: |
-          # Create main index.html that lists all reports
+          mkdir -p reports
           cat > reports/index.html << 'EOF'
           <!DOCTYPE html>
           <html lang="en">
@@ -220,37 +220,43 @@ jobs:
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
               <title>Playwright Test Reports</title>
               <style>
-                  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 40px; }
+                  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 40px; background: #f4f6f8; }
                   .container { max-width: 1200px; margin: 0 auto; }
                   .header { text-align: center; margin-bottom: 40px; }
                   .reports-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
                   .report-card { 
-                      background: #f8f9fa; 
+                      background: white; 
                       border-radius: 8px; 
                       padding: 20px; 
-                      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+                      display: flex;
+                      flex-direction: column;
+                      justify-content: space-between;
                   }
-                  .report-card h3 { margin-top: 0; }
+                  .report-card h3 { margin: 0 0 10px 0; font-size: 18px; }
                   .btn { 
                       display: inline-block; 
                       padding: 8px 16px; 
-                      background: #0066cc; 
+                      background: #007acc; 
                       color: white; 
                       text-decoration: none; 
                       border-radius: 5px; 
-                      margin: 5px;
-                      font-size: 14px;
+                      text-align: center;
                   }
-                  .btn:hover { background: #0052a3; }
+                  .btn:hover { background: #005fa3; }
                   .status { 
                       display: inline-block;
                       padding: 4px 8px;
                       border-radius: 4px;
                       font-size: 12px;
                       font-weight: bold;
+                      margin-top: 10px;
                   }
                   .status-passed { background: #28a745; color: white; }
                   .status-failed { background: #dc3545; color: white; }
+                  .status-loading { background: #ffc107; color: black; }
+                  .date { font-size: 14px; color: #555; margin-bottom: 10px; }
+                  .stats { font-size: 14px; margin-top: 10px; }
               </style>
           </head>
           <body>
@@ -266,58 +272,68 @@ jobs:
               </div>
               
               <script>
-                  // Function to fetch and display all reports
                   async function loadReports() {
-                      try {
-                          const response = await fetch('https://api.github.com/repos/${{ github.repository }}/contents/reports');
-                          const reports = await response.json();
-                          
-                          const reportsGrid = document.getElementById('reports-grid');
-                          reportsGrid.innerHTML = '';
-                          
-                          // Sort reports by name (run ID) in descending order
-                          reports.sort((a, b) => b.name.localeCompare(a.name));
-                          
-                          for (const report of reports) {
-                              if (report.type === 'dir' && report.name !== 'index.html') {
-                                  const reportUrl = `./${report.name}/index.html`;
-                                  const reportDate = new Date(report.name).toLocaleString();
-                                  
-                                  const card = document.createElement('div');
-                                  card.className = 'report-card';
-                                  card.innerHTML = `
-                                      <h3>Run ${report.name}</h3>
-                                      <p>Date: ${reportDate}</p>
-                                      <div class="status status-loading">Loading status...</div>
-                                      <div style="margin-top: 10px;">
-                                          <a href="${reportUrl}" class="btn" target="_blank">View Report</a>
-                                      </div>
-                                  `;
-                                  
-                                  reportsGrid.appendChild(card);
-                                  
-                                  // Fetch report status
-                                  fetch(`./${report.name}/ctrf-report.json`)
-                                      .then(response => response.json())
-                                      .then(data => {
-                                          const status = data.results.summary.failed > 0 ? 'failed' : 'passed';
-                                          const statusDiv = card.querySelector('.status');
-                                          statusDiv.className = `status status-${status}`;
-                                          statusDiv.textContent = status.toUpperCase();
-                                      })
-                                      .catch(() => {
-                                          const statusDiv = card.querySelector('.status');
-                                          statusDiv.className = 'status status-failed';
-                                          statusDiv.textContent = 'ERROR';
-                                      });
-                              }
+                      const response = await fetch('https://api.github.com/repos/${{ github.repository }}/contents/reports');
+                      const items = await response.json();
+                      const grid = document.getElementById('reports-grid');
+                      grid.innerHTML = '';
+
+                      const dirs = items.filter(item => item.type === 'dir');
+                      dirs.sort((a, b) => b.name.localeCompare(a.name)).reverse(); // Newest first
+
+                      for (const dir of dirs) {
+                          const timestamp = parseInt(dir.name);
+                          const dateStr = isNaN(timestamp)
+                              ? 'Invalid date'
+                              : new Date(timestamp).toLocaleString();
+
+                          const card = document.createElement('div');
+                          card.className = 'report-card';
+                          card.innerHTML = `
+                              <h3>Run ID: ${dir.name}</h3>
+                              <div class="date">📅 ${dateStr}</div>
+                              <div class="status status-loading">Loading...</div>
+                              <div class="stats">⏳ Loading stats...</div>
+                              <a class="btn" href="./${dir.name}/index.html" target="_blank">View Report</a>
+                          `;
+                          grid.appendChild(card);
+
+                          try {
+                              const res = await fetch(`./${dir.name}/ctrf-report.json`);
+                              const data = await res.json();
+
+                              const passed = data.results.summary.passed || 0;
+                              const failed = data.results.summary.failed || 0;
+                              const skipped = data.results.summary.skipped || 0;
+                              const total = passed + failed + skipped;
+
+                              const duration = data.results.summary.duration || 0;
+                              const durationSec = (duration / 1000).toFixed(2) + 's';
+
+                              const status = failed > 0 ? 'failed' : 'passed';
+                              const statusDiv = card.querySelector('.status');
+                              const statsDiv = card.querySelector('.stats');
+
+                              statusDiv.className = `status status-${status}`;
+                              statusDiv.textContent = status.toUpperCase();
+
+                              statsDiv.innerHTML = `
+                                  ✅ Passed: ${passed} <br/>
+                                  ❌ Failed: ${failed} <br/>
+                                  🚫 Skipped: ${skipped} <br/>
+                                  🧪 Total: ${total} <br/>
+                                  ⏱️ Duration: ${durationSec}
+                              `;
+                          } catch (err) {
+                              const statusDiv = card.querySelector('.status');
+                              const statsDiv = card.querySelector('.stats');
+                              statusDiv.className = 'status status-failed';
+                              statusDiv.textContent = 'ERROR';
+                              statsDiv.innerHTML = '❌ Failed to load ctrf-report.json';
                           }
-                      } catch (error) {
-                          document.getElementById('reports-grid').innerHTML = 'Error loading reports.';
                       }
                   }
-                  
-                  // Load reports when page loads
+
                   loadReports();
               </script>
           </body>
