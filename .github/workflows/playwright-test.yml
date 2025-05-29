@@ -131,31 +131,29 @@ jobs:
             echo "❌ CTRF report not found!" >> $GITHUB_STEP_SUMMARY
           fi
 
-      - name: Create GitHub Pages Structure
+      - name: Create Report Structure
         run: |
-          # Create a pages directory structure
-          mkdir -p pages
+          # Create a reports directory structure
+          mkdir -p reports/${{ github.run_id }}
 
-          # Copy HTML report to pages directory
+          # Copy HTML report to run-specific directory
           if [ -d "html-report" ]; then
-            cp -r html-report/* pages/
+            cp -r html-report/* reports/${{ github.run_id }}/
           fi
 
           # Copy CTRF report for API access
-          mkdir -p pages/api
           if [ -f "reports/ctrf-report.json" ]; then
-            cp reports/ctrf-report.json pages/api/
+            cp reports/ctrf-report.json reports/${{ github.run_id }}/ctrf-report.json
           fi
 
-          # Create an index.html if it doesn't exist
-          if [ ! -f "pages/index.html" ]; then
-            cat > pages/index.html << 'EOF'
+          # Create an index.html for the current run
+          cat > reports/${{ github.run_id }}/index.html << 'EOF'
           <!DOCTYPE html>
           <html lang="en">
           <head>
               <meta charset="UTF-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>Test Reports</title>
+              <title>Test Report - Run ${{ github.run_id }}</title>
               <style>
                   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 40px; }
                   .container { max-width: 800px; margin: 0 auto; }
@@ -168,28 +166,27 @@ jobs:
           <body>
               <div class="container">
                   <div class="header">
-                      <h1>🧪 Test Reports Dashboard</h1>
-                      <p>Latest test execution results and reports</p>
+                      <h1>🧪 Test Report - Run ${{ github.run_id }}</h1>
+                      <p>Test execution results and reports</p>
                   </div>
                   
                   <div class="card">
                       <h2>📊 Available Reports</h2>
                       <a href="./index.html" class="btn">📝 HTML Report</a>
-                      <a href="./api/ctrf-report.json" class="btn">📋 JSON Report</a>
+                      <a href="./ctrf-report.json" class="btn">📋 JSON Report</a>
                   </div>
                   
                   <div class="card">
-                      <h2>📈 Latest Results</h2>
-                      <p>Last updated: <span id="timestamp"></span></p>
+                      <h2>📈 Results Summary</h2>
+                      <p>Run ID: ${{ github.run_id }}</p>
+                      <p>Date: $(date)</p>
                       <div id="results-summary">Loading...</div>
                   </div>
               </div>
               
               <script>
-                  document.getElementById('timestamp').textContent = new Date().toLocaleString();
-                  
                   // Load and display CTRF results
-                  fetch('./api/ctrf-report.json')
+                  fetch('./ctrf-report.json')
                       .then(response => response.json())
                       .then(data => {
                           const summary = data.results.summary;
@@ -211,22 +208,131 @@ jobs:
           </body>
           </html>
           EOF
-          fi
 
-          # Add timestamp and run info
-          echo "<!-- Last updated: $(date) -->" >> pages/index.html
-          echo "<!-- Run ID: ${{ github.run_id }} -->" >> pages/index.html
+      - name: Create Main Index
+        run: |
+          # Create main index.html that lists all reports
+          cat > reports/index.html << 'EOF'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>Playwright Test Reports</title>
+              <style>
+                  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 40px; }
+                  .container { max-width: 1200px; margin: 0 auto; }
+                  .header { text-align: center; margin-bottom: 40px; }
+                  .reports-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
+                  .report-card { 
+                      background: #f8f9fa; 
+                      border-radius: 8px; 
+                      padding: 20px; 
+                      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                  }
+                  .report-card h3 { margin-top: 0; }
+                  .btn { 
+                      display: inline-block; 
+                      padding: 8px 16px; 
+                      background: #0066cc; 
+                      color: white; 
+                      text-decoration: none; 
+                      border-radius: 5px; 
+                      margin: 5px;
+                      font-size: 14px;
+                  }
+                  .btn:hover { background: #0052a3; }
+                  .status { 
+                      display: inline-block;
+                      padding: 4px 8px;
+                      border-radius: 4px;
+                      font-size: 12px;
+                      font-weight: bold;
+                  }
+                  .status-passed { background: #28a745; color: white; }
+                  .status-failed { background: #dc3545; color: white; }
+              </style>
+          </head>
+          <body>
+              <div class="container">
+                  <div class="header">
+                      <h1>🧪 Playwright Test Reports</h1>
+                      <p>Historical test execution results</p>
+                  </div>
+                  
+                  <div class="reports-grid" id="reports-grid">
+                      Loading reports...
+                  </div>
+              </div>
+              
+              <script>
+                  // Function to fetch and display all reports
+                  async function loadReports() {
+                      try {
+                          const response = await fetch('https://api.github.com/repos/${{ github.repository }}/contents/reports');
+                          const reports = await response.json();
+                          
+                          const reportsGrid = document.getElementById('reports-grid');
+                          reportsGrid.innerHTML = '';
+                          
+                          // Sort reports by name (run ID) in descending order
+                          reports.sort((a, b) => b.name.localeCompare(a.name));
+                          
+                          for (const report of reports) {
+                              if (report.type === 'dir' && report.name !== 'index.html') {
+                                  const reportUrl = `./${report.name}/index.html`;
+                                  const reportDate = new Date(report.name).toLocaleString();
+                                  
+                                  const card = document.createElement('div');
+                                  card.className = 'report-card';
+                                  card.innerHTML = `
+                                      <h3>Run ${report.name}</h3>
+                                      <p>Date: ${reportDate}</p>
+                                      <div class="status status-loading">Loading status...</div>
+                                      <div style="margin-top: 10px;">
+                                          <a href="${reportUrl}" class="btn" target="_blank">View Report</a>
+                                      </div>
+                                  `;
+                                  
+                                  reportsGrid.appendChild(card);
+                                  
+                                  // Fetch report status
+                                  fetch(`./${report.name}/ctrf-report.json`)
+                                      .then(response => response.json())
+                                      .then(data => {
+                                          const status = data.results.summary.failed > 0 ? 'failed' : 'passed';
+                                          const statusDiv = card.querySelector('.status');
+                                          statusDiv.className = `status status-${status}`;
+                                          statusDiv.textContent = status.toUpperCase();
+                                      })
+                                      .catch(() => {
+                                          const statusDiv = card.querySelector('.status');
+                                          statusDiv.className = 'status status-failed';
+                                          statusDiv.textContent = 'ERROR';
+                                      });
+                              }
+                          }
+                      } catch (error) {
+                          document.getElementById('reports-grid').innerHTML = 'Error loading reports.';
+                      }
+                  }
+                  
+                  // Load reports when page loads
+                  loadReports();
+              </script>
+          </body>
+          </html>
+          EOF
 
-      - name: Deploy to GitHub Pages
+      - name: Deploy Reports
         uses: peaceiris/actions-gh-pages@v3
-        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./pages
+          publish_dir: ./reports
           publish_branch: gh-pages
-          keep_files: false
+          keep_files: true
           enable_jekyll: false
-          commit_message: "Deploy test reports from ${{ github.sha }}"
+          commit_message: "Update test reports from run ${{ github.run_id }}"
           user_name: "github-actions[bot]"
           user_email: "github-actions[bot]@users.noreply.github.com"
 
@@ -244,7 +350,7 @@ jobs:
                 const summary = report.results.summary;
                 
                 const passRate = ((summary.passed / summary.tests) * 100).toFixed(1);
-                const pagesUrl = `https://${context.repo.owner}.github.io/${context.repo.repo}`;
+                const reportsUrl = `https://${context.repo.owner}.github.io/${context.repo.repo}/reports/${{ github.run_id }}/index.html`;
                 
                 let comment = `## 🧪 Playwright Test Results
                 
@@ -257,7 +363,7 @@ jobs:
                 | 📈 Pass Rate | ${passRate}% |
                 | ⏱️ Duration | ${summary.stop - summary.start}ms |
                 
-                📊 **[View Detailed Reports](${pagesUrl})**
+                📊 **[View Detailed Report](${reportsUrl})**
                 `;
                 
                 if (summary.failed > 0) {
@@ -269,7 +375,7 @@ jobs:
                     comment += `| ${test.name} | ${errorMsg} |\n`;
                   });
                   
-                  comment += `\nCheck the [detailed HTML report](${pagesUrl}) for more information.`;
+                  comment += `\nCheck the [detailed report](${reportsUrl}) for more information.`;
                 } else {
                   comment += '\n✅ **All tests passed!** Great job! 🎉';
                 }
