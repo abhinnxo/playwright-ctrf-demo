@@ -88,126 +88,126 @@ jobs:
           name: playwright-html-report
           path: html-report/
 
-      - name: Parse and Display Results
-        run: |
-          echo "## 🧪 Test Results Summary" >> $GITHUB_STEP_SUMMARY
+      # - name: Parse and Display Results
+      #   run: |
+      #     echo "## 🧪 Test Results Summary" >> $GITHUB_STEP_SUMMARY
 
-          if [ -f "reports/ctrf-report.json" ]; then
-            # Extract metrics using jq
-            total=$(jq -r '.results.summary.tests' reports/ctrf-report.json)
-            passed=$(jq -r '.results.summary.passed' reports/ctrf-report.json)
-            failed=$(jq -r '.results.summary.failed' reports/ctrf-report.json)
-            skipped=$(jq -r '.results.summary.skipped' reports/ctrf-report.json)
-            duration=$(jq -r '.results.summary.stop - .results.summary.start' reports/ctrf-report.json)
-            
-            echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
-            echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
-            echo "| 📊 Total Tests | $total |" >> $GITHUB_STEP_SUMMARY
-            echo "| ✅ Passed | $passed |" >> $GITHUB_STEP_SUMMARY
-            echo "| ❌ Failed | $failed |" >> $GITHUB_STEP_SUMMARY
-            echo "| ⏭️ Skipped | $skipped |" >> $GITHUB_STEP_SUMMARY
-            echo "| ⏱️ Duration | ${duration}ms |" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            
-            # Add status message
-            if [ "$failed" -gt 0 ]; then
-              echo "❌ **Test run completed with failures!**" >> $GITHUB_STEP_SUMMARY
-              echo "" >> $GITHUB_STEP_SUMMARY
-              
-              # Extract and display failed tests
-              echo "## 💥 Failed Tests" >> $GITHUB_STEP_SUMMARY
-              echo "| Test Name | Error Message |" >> $GITHUB_STEP_SUMMARY
-              echo "|-----------|---------------|" >> $GITHUB_STEP_SUMMARY
-              
-              # Get failed tests from CTRF report
-              jq -r '.results.tests[] | select(.status == "failed") | "| " + .name + " | " + (.message // "No error message") + " |"' reports/ctrf-report.json >> $GITHUB_STEP_SUMMARY
-              
-              echo "" >> $GITHUB_STEP_SUMMARY
-              echo "Check the test artifacts for detailed failure information." >> $GITHUB_STEP_SUMMARY
-            else
-              echo "✅ **All tests passed successfully!**" >> $GITHUB_STEP_SUMMARY
-            fi
-          else
-            echo "❌ CTRF report not found!" >> $GITHUB_STEP_SUMMARY
+      #     if [ -f "reports/ctrf-report.json" ]; then
+      #       # Extract metrics using jq
+      #       total=$(jq -r '.results.summary.tests' reports/ctrf-report.json)
+      #       passed=$(jq -r '.results.summary.passed' reports/ctrf-report.json)
+      #       failed=$(jq -r '.results.summary.failed' reports/ctrf-report.json)
+      #       skipped=$(jq -r '.results.summary.skipped' reports/ctrf-report.json)
+      #       duration=$(jq -r '.results.summary.stop - .results.summary.start' reports/ctrf-report.json)
+
+      #       echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+      #       echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+      #       echo "| 📊 Total Tests | $total |" >> $GITHUB_STEP_SUMMARY
+      #       echo "| ✅ Passed | $passed |" >> $GITHUB_STEP_SUMMARY
+      #       echo "| ❌ Failed | $failed |" >> $GITHUB_STEP_SUMMARY
+      #       echo "| ⏭️ Skipped | $skipped |" >> $GITHUB_STEP_SUMMARY
+      #       echo "| ⏱️ Duration | ${duration}ms |" >> $GITHUB_STEP_SUMMARY
+      #       echo "" >> $GITHUB_STEP_SUMMARY
+
+      #       # Add status message
+      #       if [ "$failed" -gt 0 ]; then
+      #         echo "❌ **Test run completed with failures!**" >> $GITHUB_STEP_SUMMARY
+      #         echo "" >> $GITHUB_STEP_SUMMARY
+
+      #         # Extract and display failed tests
+      #         echo "## 💥 Failed Tests" >> $GITHUB_STEP_SUMMARY
+      #         echo "| Test Name | Error Message |" >> $GITHUB_STEP_SUMMARY
+      #         echo "|-----------|---------------|" >> $GITHUB_STEP_SUMMARY
+
+      #         # Get failed tests from CTRF report
+      #         jq -r '.results.tests[] | select(.status == "failed") | "| " + .name + " | " + (.message // "No error message") + " |"' reports/ctrf-report.json >> $GITHUB_STEP_SUMMARY
+
+      #         echo "" >> $GITHUB_STEP_SUMMARY
+      #         echo "Check the test artifacts for detailed failure information." >> $GITHUB_STEP_SUMMARY
+      #       else
+      #         echo "✅ **All tests passed successfully!**" >> $GITHUB_STEP_SUMMARY
+      #       fi
+      #     else
+      #       echo "❌ CTRF report not found!" >> $GITHUB_STEP_SUMMARY
+      #     fi
+
+      - name: Create Report Structure
+        run: |
+          # Create a reports directory structure
+          mkdir -p reports/${{ github.run_id }}
+
+          # Copy HTML report to run-specific directory
+          if [ -d "html-report" ]; then
+            cp -r html-report/* reports/${{ github.run_id }}/
           fi
 
-      # - name: Create Report Structure
-      #   run: |
-      #     # Create a reports directory structure
-      #     mkdir -p reports/${{ github.run_id }}
+          # Copy CTRF report for API access
+          if [ -f "reports/ctrf-report.json" ]; then
+            cp reports/ctrf-report.json reports/${{ github.run_id }}/ctrf-report.json
+          fi
 
-      #     # Copy HTML report to run-specific directory
-      #     if [ -d "html-report" ]; then
-      #       cp -r html-report/* reports/${{ github.run_id }}/
-      #     fi
+          # Create an index.html for the current run
+          cat > ./index.html << 'EOF'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>Test Report - Run ${{ github.run_id }}</title>
+              <style>
+                  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 40px; }
+                  .container { max-width: 800px; margin: 0 auto; }
+                  .header { text-align: center; margin-bottom: 40px; }
+                  .card { background: #f8f9fa; border-radius: 8px; padding: 20px; margin: 20px 0; }
+                  .btn { display: inline-block; padding: 10px 20px; background: #0066cc; color: white; text-decoration: none; border-radius: 5px; margin: 10px 5px; }
+                  .btn:hover { background: #0052a3; }
+              </style>
+          </head>
+          <body>
+              <div class="container">
+                  <div class="header">
+                      <h1>🧪 Test Report - Run ${{ github.run_id }}</h1>
+                      <p>Test execution results and reports</p>
+                  </div>
 
-      #     # Copy CTRF report for API access
-      #     if [ -f "reports/ctrf-report.json" ]; then
-      #       cp reports/ctrf-report.json reports/${{ github.run_id }}/ctrf-report.json
-      #     fi
+                  <div class="card">
+                      <h2>📊 Available Reports</h2>
+                      <a href="./index.html" class="btn">📝 HTML Report</a>
+                      <a href="./ctrf-report.json" class="btn">📋 JSON Report</a>
+                  </div>
 
-      #     # Create an index.html for the current run
-      #     cat > ./index.html << 'EOF'
-      #     <!DOCTYPE html>
-      #     <html lang="en">
-      #     <head>
-      #         <meta charset="UTF-8">
-      #         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      #         <title>Test Report - Run ${{ github.run_id }}</title>
-      #         <style>
-      #             body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 40px; }
-      #             .container { max-width: 800px; margin: 0 auto; }
-      #             .header { text-align: center; margin-bottom: 40px; }
-      #             .card { background: #f8f9fa; border-radius: 8px; padding: 20px; margin: 20px 0; }
-      #             .btn { display: inline-block; padding: 10px 20px; background: #0066cc; color: white; text-decoration: none; border-radius: 5px; margin: 10px 5px; }
-      #             .btn:hover { background: #0052a3; }
-      #         </style>
-      #     </head>
-      #     <body>
-      #         <div class="container">
-      #             <div class="header">
-      #                 <h1>🧪 Test Report - Run ${{ github.run_id }}</h1>
-      #                 <p>Test execution results and reports</p>
-      #             </div>
+                  <div class="card">
+                      <h2>📈 Results Summary</h2>
+                      <p>Run ID: ${{ github.run_id }}</p>
+                      <p>Date: $(date)</p>
+                      <div id="results-summary">Loading...</div>
+                  </div>
+              </div>
 
-      #             <div class="card">
-      #                 <h2>📊 Available Reports</h2>
-      #                 <a href="./index.html" class="btn">📝 HTML Report</a>
-      #                 <a href="./ctrf-report.json" class="btn">📋 JSON Report</a>
-      #             </div>
-
-      #             <div class="card">
-      #                 <h2>📈 Results Summary</h2>
-      #                 <p>Run ID: ${{ github.run_id }}</p>
-      #                 <p>Date: $(date)</p>
-      #                 <div id="results-summary">Loading...</div>
-      #             </div>
-      #         </div>
-
-      #         <script>
-      #             // Load and display CTRF results
-      #             fetch('./ctrf-report.json')
-      #                 .then(response => response.json())
-      #                 .then(data => {
-      #                     const summary = data.results.summary;
-      #                     const html = `
-      #                         <table style="width: 100%; border-collapse: collapse;">
-      #                             <tr><td style="padding: 8px; border: 1px solid #ddd;"><strong>Total Tests:</strong></td><td style="padding: 8px; border: 1px solid #ddd;">${summary.tests}</td></tr>
-      #                             <tr><td style="padding: 8px; border: 1px solid #ddd;"><strong>Passed:</strong></td><td style="padding: 8px; border: 1px solid #ddd; color: green;">${summary.passed}</td></tr>
-      #                             <tr><td style="padding: 8px; border: 1px solid #ddd;"><strong>Failed:</strong></td><td style="padding: 8px; border: 1px solid #ddd; color: red;">${summary.failed}</td></tr>
-      #                             <tr><td style="padding: 8px; border: 1px solid #ddd;"><strong>Skipped:</strong></td><td style="padding: 8px; border: 1px solid #ddd;">${summary.skipped}</td></tr>
-      #                             <tr><td style="padding: 8px; border: 1px solid #ddd;"><strong>Duration:</strong></td><td style="padding: 8px; border: 1px solid #ddd;">${summary.stop - summary.start}ms</td></tr>
-      #                         </table>
-      #                     `;
-      #                     document.getElementById('results-summary').innerHTML = html;
-      #                 })
-      #                 .catch(error => {
-      #                     document.getElementById('results-summary').innerHTML = 'Unable to load test results.';
-      #                 });
-      #         </script>
-      #     </body>
-      #     </html>
-      #     EOF
+              <script>
+                  // Load and display CTRF results
+                  fetch('./ctrf-report.json')
+                      .then(response => response.json())
+                      .then(data => {
+                          const summary = data.results.summary;
+                          const html = `
+                              <table style="width: 100%; border-collapse: collapse;">
+                                  <tr><td style="padding: 8px; border: 1px solid #ddd;"><strong>Total Tests:</strong></td><td style="padding: 8px; border: 1px solid #ddd;">${summary.tests}</td></tr>
+                                  <tr><td style="padding: 8px; border: 1px solid #ddd;"><strong>Passed:</strong></td><td style="padding: 8px; border: 1px solid #ddd; color: green;">${summary.passed}</td></tr>
+                                  <tr><td style="padding: 8px; border: 1px solid #ddd;"><strong>Failed:</strong></td><td style="padding: 8px; border: 1px solid #ddd; color: red;">${summary.failed}</td></tr>
+                                  <tr><td style="padding: 8px; border: 1px solid #ddd;"><strong>Skipped:</strong></td><td style="padding: 8px; border: 1px solid #ddd;">${summary.skipped}</td></tr>
+                                  <tr><td style="padding: 8px; border: 1px solid #ddd;"><strong>Duration:</strong></td><td style="padding: 8px; border: 1px solid #ddd;">${summary.stop - summary.start}ms</td></tr>
+                              </table>
+                          `;
+                          document.getElementById('results-summary').innerHTML = html;
+                      })
+                      .catch(error => {
+                          document.getElementById('results-summary').innerHTML = 'Unable to load test results.';
+                      });
+              </script>
+          </body>
+          </html>
+          EOF
 
       - name: Create Main Index
         run: |
