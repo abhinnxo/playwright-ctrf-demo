@@ -1,152 +1,409 @@
-name: Playwright CI & GitHub Pages Report
+name: Playwright Tests
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
+  pull_request:
+    branches: [main]
 
 jobs:
-  test-and-publish:
+  test:
+    timeout-minutes: 60
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout main branch
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: lts/*
 
       - name: Install dependencies
         run: npm ci
 
+      - name: Install Playwright Browsers
+        run: npx playwright install --with-deps
+
       - name: Run Playwright tests
-        run: npx playwright test --reporter html
+        run: npx playwright test
 
-      - name: Generate Unique Report ID
-        id: vars
-        run: echo "id=run-$(date +%s)" >> $GITHUB_OUTPUT
-
-      - name: Copy HTML report to folder
+      - name: Generate unique ID and timestamp
+        id: generate-id
         run: |
-          mkdir ${{ steps.vars.outputs.id }}
-          cp -r playwright-report/* ${{ steps.vars.outputs.id }}/
+          UNIQUE_ID=$(date +%Y%m%d-%H%M%S)-$(echo $GITHUB_SHA | cut -c1-7)
+          echo "unique_id=$UNIQUE_ID" >> $GITHUB_OUTPUT
+          echo "timestamp=$(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_OUTPUT
+          echo "commit_msg=$(git log -1 --pretty=%B | head -1)" >> $GITHUB_OUTPUT
+          echo "branch_name=${{ github.ref_name }}" >> $GITHUB_OUTPUT
 
-      - name: Install jq
-        run: sudo apt-get install -y jq
+      - name: Prepare test results
+        if: always()
+        run: |
+          mkdir -p temp-reports/${{ steps.generate-id.outputs.unique_id }}
+
+          # Copy Playwright HTML report
+          if [ -d "playwright-report" ]; then
+            cp -r playwright-report/* temp-reports/${{ steps.generate-id.outputs.unique_id }}/
+          fi
+
+          # Create metadata file for the test run
+          cat > temp-reports/${{ steps.generate-id.outputs.unique_id }}/metadata.json << EOF
+          {
+            "id": "${{ steps.generate-id.outputs.unique_id }}",
+            "timestamp": "${{ steps.generate-id.outputs.timestamp }}",
+            "commit": "${{ github.sha }}",
+            "commitMessage": "${{ steps.generate-id.outputs.commit_msg }}",
+            "branch": "${{ steps.generate-id.outputs.branch_name }}",
+            "author": "${{ github.actor }}",
+            "runId": "${{ github.run_id }}",
+            "runNumber": "${{ github.run_number }}",
+            "status": "${{ job.status }}"
+          }
+          EOF
 
       - name: Checkout gh-pages branch
+        if: always()
         uses: actions/checkout@v4
         with:
           ref: gh-pages
           path: gh-pages
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Sync new report to gh-pages and update index.html
+      - name: Setup gh-pages branch
+        if: always()
         run: |
-          timestamp=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
-          entry="{\"id\": \"${{ steps.vars.outputs.id }}\", \"timestamp\": \"$timestamp\"}"
-
           cd gh-pages
+          git config user.name github-actions
+          git config user.email github-actions@github.com
 
-          # Copy report
-          mkdir -p ${{ steps.vars.outputs.id }}
-          cp -r ../${{ steps.vars.outputs.id }}/* ${{ steps.vars.outputs.id }}/
+          # Create reports directory if it doesn't exist
+          mkdir -p reports
 
-          # Ensure index.json exists
-          if [ ! -f index.json ]; then
-            echo "[]" > index.json
+          # Create main index.html if it doesn't exist
+          if [ ! -f index.html ]; then
+            cat > index.html << 'EOF'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>Playwright Test Results</title>
+              <style>
+                  * {
+                      margin: 0;
+                      padding: 0;
+                      box-sizing: border-box;
+                  }
+                  
+                  body {
+                      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                      min-height: 100vh;
+                      padding: 2rem;
+                  }
+                  
+                  .container {
+                      max-width: 1200px;
+                      margin: 0 auto;
+                  }
+                  
+                  h1 {
+                      text-align: center;
+                      color: white;
+                      margin-bottom: 2rem;
+                      font-size: 2.5rem;
+                      text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+                  }
+                  
+                  .test-grid {
+                      display: grid;
+                      grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+                      gap: 1.5rem;
+                      margin-top: 2rem;
+                  }
+                  
+                  .test-card {
+                      background: white;
+                      border-radius: 12px;
+                      padding: 1.5rem;
+                      box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+                      transition: transform 0.3s ease, box-shadow 0.3s ease;
+                      border: 1px solid #e1e5e9;
+                  }
+                  
+                  .test-card:hover {
+                      transform: translateY(-5px);
+                      box-shadow: 0 12px 35px rgba(0,0,0,0.2);
+                  }
+                  
+                  .test-header {
+                      display: flex;
+                      justify-content: space-between;
+                      align-items: flex-start;
+                      margin-bottom: 1rem;
+                  }
+                  
+                  .test-id {
+                      font-weight: 600;
+                      color: #2d3748;
+                      font-size: 1.1rem;
+                  }
+                  
+                  .status-badge {
+                      padding: 0.25rem 0.75rem;
+                      border-radius: 20px;
+                      font-size: 0.8rem;
+                      font-weight: 600;
+                      text-transform: uppercase;
+                  }
+                  
+                  .status-success {
+                      background: #c6f6d5;
+                      color: #2f855a;
+                  }
+                  
+                  .status-failure {
+                      background: #fed7d7;
+                      color: #c53030;
+                  }
+                  
+                  .status-unknown {
+                      background: #e2e8f0;
+                      color: #4a5568;
+                  }
+                  
+                  .test-details {
+                      margin-bottom: 1rem;
+                  }
+                  
+                  .detail-row {
+                      display: flex;
+                      justify-content: space-between;
+                      margin-bottom: 0.5rem;
+                      font-size: 0.9rem;
+                  }
+                  
+                  .detail-label {
+                      color: #718096;
+                      font-weight: 500;
+                  }
+                  
+                  .detail-value {
+                      color: #2d3748;
+                      font-weight: 400;
+                      text-align: right;
+                      max-width: 60%;
+                      word-break: break-word;
+                  }
+                  
+                  .commit-message {
+                      background: #f7fafc;
+                      padding: 0.75rem;
+                      border-radius: 6px;
+                      margin: 1rem 0;
+                      font-size: 0.85rem;
+                      color: #4a5568;
+                      border-left: 3px solid #667eea;
+                  }
+                  
+                  .view-results-btn {
+                      width: 100%;
+                      padding: 0.75rem 1rem;
+                      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                      color: white;
+                      border: none;
+                      border-radius: 8px;
+                      font-weight: 600;
+                      cursor: pointer;
+                      transition: all 0.3s ease;
+                      text-decoration: none;
+                      display: inline-block;
+                      text-align: center;
+                      font-size: 0.95rem;
+                  }
+                  
+                  .view-results-btn:hover {
+                      transform: translateY(-2px);
+                      box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+                  }
+                  
+                  .no-results {
+                      text-align: center;
+                      color: white;
+                      font-size: 1.2rem;
+                      margin-top: 3rem;
+                      opacity: 0.8;
+                  }
+                  
+                  .loading {
+                      text-align: center;
+                      color: white;
+                      font-size: 1.1rem;
+                      margin-top: 2rem;
+                  }
+                  
+                  @media (max-width: 768px) {
+                      body {
+                          padding: 1rem;
+                      }
+                      
+                      h1 {
+                          font-size: 2rem;
+                      }
+                      
+                      .test-grid {
+                          grid-template-columns: 1fr;
+                      }
+                  }
+              </style>
+          </head>
+          <body>
+              <div class="container">
+                  <h1>🎭 Playwright Test Results</h1>
+                  <div class="loading">Loading test results...</div>
+                  <div class="test-grid" id="testGrid"></div>
+                  <div class="no-results" id="noResults" style="display: none;">
+                      No test results found. Run some tests to see them here!
+                  </div>
+              </div>
+              
+              <script>
+                  async function loadTestResults() {
+                      try {
+                          const response = await fetch('reports/');
+                          const html = await response.text();
+                          
+                          // Parse directory listing to find test folders
+                          const parser = new DOMParser();
+                          const doc = parser.parseFromString(html, 'text/html');
+                          const links = doc.querySelectorAll('a');
+                          
+                          const testFolders = [];
+                          links.forEach(link => {
+                              const href = link.getAttribute('href');
+                              if (href && href.match(/^\d{8}-\d{6}-[a-f0-9]{7}\/$/)) {
+                                  testFolders.push(href.replace('/', ''));
+                              }
+                          });
+                          
+                          if (testFolders.length === 0) {
+                              document.querySelector('.loading').style.display = 'none';
+                              document.getElementById('noResults').style.display = 'block';
+                              return;
+                          }
+                          
+                          // Sort by newest first
+                          testFolders.sort((a, b) => b.localeCompare(a));
+                          
+                          const testGrid = document.getElementById('testGrid');
+                          document.querySelector('.loading').style.display = 'none';
+                          
+                          for (const folder of testFolders) {
+                              try {
+                                  const metadataResponse = await fetch(`reports/${folder}/metadata.json`);
+                                  const metadata = await metadataResponse.json();
+                                  
+                                  const card = createTestCard(metadata, folder);
+                                  testGrid.appendChild(card);
+                              } catch (error) {
+                                  console.error(`Error loading metadata for ${folder}:`, error);
+                                  // Create a basic card without metadata
+                                  const basicCard = createBasicTestCard(folder);
+                                  testGrid.appendChild(basicCard);
+                              }
+                          }
+                      } catch (error) {
+                          console.error('Error loading test results:', error);
+                          document.querySelector('.loading').textContent = 'Error loading test results';
+                      }
+                  }
+                  
+                  function createTestCard(metadata, folder) {
+                      const card = document.createElement('div');
+                      card.className = 'test-card';
+                      
+                      const statusClass = metadata.status === 'success' ? 'status-success' : 
+                                         metadata.status === 'failure' ? 'status-failure' : 'status-unknown';
+                      
+                      const commitShort = metadata.commit ? metadata.commit.substring(0, 7) : 'unknown';
+                      const dateFormatted = new Date(metadata.timestamp).toLocaleString();
+                      
+                      card.innerHTML = `
+                          <div class="test-header">
+                              <div class="test-id">${metadata.id}</div>
+                              <div class="status-badge ${statusClass}">${metadata.status || 'unknown'}</div>
+                          </div>
+                          <div class="test-details">
+                              <div class="detail-row">
+                                  <span class="detail-label">Date:</span>
+                                  <span class="detail-value">${dateFormatted}</span>
+                              </div>
+                              <div class="detail-row">
+                                  <span class="detail-label">Commit:</span>
+                                  <span class="detail-value">${commitShort}</span>
+                              </div>
+                              <div class="detail-row">
+                                  <span class="detail-label">Branch:</span>
+                                  <span class="detail-value">${metadata.branch || 'unknown'}</span>
+                              </div>
+                              <div class="detail-row">
+                                  <span class="detail-label">Author:</span>
+                                  <span class="detail-value">${metadata.author || 'unknown'}</span>
+                              </div>
+                          </div>
+                          ${metadata.commitMessage ? `<div class="commit-message">${metadata.commitMessage}</div>` : ''}
+                          <a href="reports/${folder}/" class="view-results-btn">
+                              View Test Results →
+                          </a>
+                      `;
+                      
+                      return card;
+                  }
+                  
+                  function createBasicTestCard(folder) {
+                      const card = document.createElement('div');
+                      card.className = 'test-card';
+                      
+                      card.innerHTML = `
+                          <div class="test-header">
+                              <div class="test-id">${folder}</div>
+                              <div class="status-badge status-unknown">unknown</div>
+                          </div>
+                          <div class="test-details">
+                              <div class="detail-row">
+                                  <span class="detail-label">Test ID:</span>
+                                  <span class="detail-value">${folder}</span>
+                              </div>
+                          </div>
+                          <a href="reports/${folder}/" class="view-results-btn">
+                              View Test Results →
+                          </a>
+                      `;
+                      
+                      return card;
+                  }
+                  
+                  // Load test results when page loads
+                  loadTestResults();
+              </script>
+          </body>
+          </html>
+          EOF
           fi
 
-          # Append to index.json
-          jq ". + [$entry]" index.json > tmp.json && mv tmp.json index.json
+      - name: Copy test results to gh-pages
+        if: always()
+        run: |
+          # Copy the test results to gh-pages
+          cp -r temp-reports/${{ steps.generate-id.outputs.unique_id }} gh-pages/reports/
 
-          # Generate index.html
-          cat > index.html <<EOF
-<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Playwright Test Reports</title>
-    <style>
-      body {
-        font-family: sans-serif;
-        margin: 2rem;
-        background: #f4f4f4;
-      }
-      h1 {
-        text-align: center;
-        color: #333;
-      }
-      .grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-        gap: 1rem;
-        margin-top: 2rem;
-      }
-      .card {
-        background: white;
-        padding: 1rem;
-        border-radius: 10px;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-        display: flex;
-        flex-direction: column;
-        justify-content: space-between;
-      }
-      .card h2 {
-        font-size: 1.1rem;
-        margin: 0 0 0.5rem;
-      }
-      .card p {
-        color: #666;
-        font-size: 0.9rem;
-      }
-      .cta {
-        margin-top: 1rem;
-        text-align: right;
-      }
-      .cta a {
-        text-decoration: none;
-        background: #007acc;
-        color: white;
-        padding: 0.5rem 1rem;
-        border-radius: 5px;
-        transition: background 0.2s;
-      }
-      .cta a:hover {
-        background: #005fa3;
-      }
-    </style>
-  </head>
-  <body>
-    <h1>Playwright Test Reports</h1>
-    <div class="grid">
-EOF
-
-          jq -c '.[]' index.json | while read -r run; do
-            id=$(echo "$run" | jq -r '.id')
-            timestamp=$(echo "$run" | jq -r '.timestamp')
-            cat >> index.html <<EOF
-      <div class="card">
-        <h2>$id</h2>
-        <p>Run Date: $timestamp</p>
-        <div class="cta">
-          <a href="./$id/index.html" target="_blank">View Report</a>
-        </div>
-      </div>
-EOF
-          done
-
-          cat >> index.html <<EOF
-    </div>
-  </body>
-</html>
-EOF
-
-          # Commit and push
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
+          cd gh-pages
           git add .
-          git commit -m "Add Playwright report ${{ steps.vars.outputs.id }}" || echo "No changes to commit"
-          git push origin gh-pages
+          git commit -m "Add test results for ${{ steps.generate-id.outputs.unique_id }}" || exit 0
+          git push
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report-${{ steps.generate-id.outputs.unique_id }}
+          path: playwright-report/
+          retention-days: 30
