@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Report - Run 15319547612</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 40px; }
+        .container { max-width: 800px; margin: 0 auto; }
+        .header { text-align: center; margin-bottom: 40px; }
+        .card { background: #f8f9fa; border-radius: 8px; padding: 20px; margin: 20px 0; }
+        .btn { display: inline-block; padding: 10px 20px; background: #0066cc; color: white; text-decoration: none; border-radius: 5px; margin: 10px 5px; }
+        .btn:hover { background: #0052a3; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🧪 Test Report - Run 15319547612</h1>
+            <p>Test execution results and reports</p>
+        </div>
+        
+        <div class="card">
+            <h2>📊 Available Reports</h2>
+            <a href="./index.html" class="btn">📝 HTML Report</a>
+            <a href="./ctrf-report.json" class="btn">📋 JSON Report</a>
+        </div>
+        
+        <div class="card">
+            <h2>📈 Results Summary</h2>
+            <p>Run ID: 15319547612</p>
+            <p>Date: $(date)</p>
+            <div id="results-summary">Loading...</div>
+        </div>
+    </div>
+    
+    <script>
+        // Load and display CTRF results
+        fetch('./ctrf-report.json')
+            .then(response => response.json())
+            .then(data => {
+                const summary = data.results.summary;
+                const html = `
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr><td style="padding: 8px; border: 1px solid #ddd;"><strong>Total Tests:</strong></td><td style="padding: 8px; border: 1px solid #ddd;">${summary.tests}</td></tr>
+                        <tr><td style="padding: 8px; border: 1px solid #ddd;"><strong>Passed:</strong></td><td style="padding: 8px; border: 1px solid #ddd; color: green;">${summary.passed}</td></tr>
+                        <tr><td style="padding: 8px; border: 1px solid #ddd;"><strong>Failed:</strong></td><td style="padding: 8px; border: 1px solid #ddd; color: red;">${summary.failed}</td></tr>
+                        <tr><td style="padding: 8px; border: 1px solid #ddd;"><strong>Skipped:</strong></td><td style="padding: 8px; border: 1px solid #ddd;">${summary.skipped}</td></tr>
+                        <tr><td style="padding: 8px; border: 1px solid #ddd;"><strong>Duration:</strong></td><td style="padding: 8px; border: 1px solid #ddd;">${summary.stop - summary.start}ms</td></tr>
+                    </table>
+                `;
+                document.getElementById('results-summary').innerHTML = html;
+            })
+            .catch(error => {
+                document.getElementById('results-summary').innerHTML = 'Unable to load test results.';
+            });
+    </script>
+</body>
+</html>
