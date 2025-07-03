@@ -129,7 +129,3 @@ jobs:
           name: playwright-report-${{ steps.generate-id.outputs.unique_id }}
           path: playwright-report/
           retention-days: 30
-
-      - name: Cleanup temp reports
-        if: always()
-        run: rm -rf temp-reports
