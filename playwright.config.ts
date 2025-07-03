@@ -20,21 +20,21 @@ export default defineConfig({
   reporter: [
     ["html", { outputFolder: "playwright-report" }],
     ["json", { outputFile: "test-results/results.json" }],
-    [
-      "playwright-ctrf-json-reporter",
-      {
-        outputFile: "ctrf-report.json",
-        outputDir: "test-results",
-        minimal: false,
-        testType: "e2e",
-        appName: "Playwright CTRF Demo",
-        appVersion: "1.0.0",
-        buildName: process.env.GITHUB_RUN_NUMBER
-          ? `Build #${process.env.GITHUB_RUN_NUMBER}`
-          : "Local Build",
-        buildNumber: process.env.GITHUB_RUN_NUMBER || "0",
-      },
-    ],
+    // [
+    //   "playwright-ctrf-json-reporter",
+    //   {
+    //     outputFile: "ctrf-report.json",
+    //     outputDir: "test-results",
+    //     minimal: false,
+    //     testType: "e2e",
+    //     appName: "Playwright CTRF Demo",
+    //     appVersion: "1.0.0",
+    //     buildName: process.env.GITHUB_RUN_NUMBER
+    //       ? `Build #${process.env.GITHUB_RUN_NUMBER}`
+    //       : "Local Build",
+    //     buildNumber: process.env.GITHUB_RUN_NUMBER || "0",
+    //   },
+    // ],
   ],
 
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
